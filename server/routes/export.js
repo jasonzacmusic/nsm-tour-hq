@@ -63,6 +63,32 @@ router.get('/stats', (req, res) => {
     FROM leads GROUP BY cluster ORDER BY cluster
   `).all();
   const byArchetype = db.prepare('SELECT archetype, COUNT(*) as c FROM leads GROUP BY archetype').all();
+  const bySendVia = db.prepare('SELECT send_via, COUNT(*) as c FROM leads GROUP BY send_via').all();
+  const instantlyReady = db.prepare(`
+    SELECT COUNT(*) as c FROM leads
+    WHERE send_via = 'INSTANTLY_OK'
+      AND COALESCE(contact_email, '') != ''
+  `).get().c;
+  const handwrite = db.prepare(`
+    SELECT COUNT(*) as c FROM leads
+    WHERE send_via = 'DO_NOT_USE_INSTANTLY'
+  `).get().c;
+  const missingEmail = db.prepare(`
+    SELECT COUNT(*) as c FROM leads
+    WHERE COALESCE(contact_email, '') = ''
+  `).get().c;
+  const needsVerification = db.prepare(`
+    SELECT COUNT(*) as c FROM leads
+    WHERE lower(COALESCE(verified, language_confidence, '')) = 'low'
+       OR COALESCE(website, '') = ''
+       OR notes LIKE '%Verify%'
+       OR notes LIKE '%verify%'
+  `).get().c;
+  const invalidSendVia = db.prepare(`
+    SELECT COUNT(*) as c FROM leads
+    WHERE send_via NOT IN ('INSTANTLY_OK', 'DO_NOT_USE_INSTANTLY')
+       OR send_via IS NULL
+  `).get().c;
   const emailsSent = db.prepare("SELECT COUNT(*) as c FROM email_log WHERE status != 'pending'").get().c;
   const replies = db.prepare('SELECT COUNT(*) as c FROM email_log WHERE replied_at IS NOT NULL').get().c;
   res.json({
@@ -72,6 +98,12 @@ router.get('/stats', (req, res) => {
     reply_rate: emailsSent ? +(replies / emailsSent * 100).toFixed(1) : 0,
     by_cluster: byCluster,
     by_archetype: byArchetype,
+    by_send_via: bySendVia,
+    instantly_ready: instantlyReady,
+    handwrite,
+    missing_email: missingEmail,
+    needs_verification: needsVerification,
+    invalid_send_via: invalidSendVia,
   });
 });
 

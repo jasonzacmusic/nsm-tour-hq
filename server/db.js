@@ -109,29 +109,35 @@ const DEFAULT_CLUSTERS = [
   { name: 'South Africa', color: '#2ecc71', countries: 'South Africa', cities: 'Cape Town, Johannesburg', priority: 9 },
   { name: 'Thailand', color: '#e74c3c', countries: 'Thailand', cities: 'Bangkok, Chiang Mai', priority: 10 },
   { name: 'Zimbabwe+Namibia', color: '#34495e', countries: 'Zimbabwe, Namibia', cities: 'Harare, Windhoek', priority: 11 },
+  { name: 'Malaysia+SriLanka', color: '#8e8cd8', countries: 'Malaysia, Sri Lanka', cities: 'Kuala Lumpur, Johor, Colombo, Kandy', priority: 12 },
 ];
 
 export function seedClusters() {
-  const existing = db.prepare('SELECT COUNT(*) as c FROM clusters').get().c;
-  if (existing > 0) return;
   const stmt = db.prepare(
-    'INSERT INTO clusters (name, color, countries, cities, priority) VALUES (?, ?, ?, ?, ?)'
+    `INSERT INTO clusters (name, color, countries, cities, priority)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(name) DO UPDATE SET
+       color = excluded.color,
+       countries = excluded.countries,
+       cities = excluded.cities,
+       priority = excluded.priority`
   );
   const tx = db.transaction((rows) => {
     for (const r of rows) stmt.run(r.name, r.color, r.countries, r.cities, r.priority);
   });
   tx(DEFAULT_CLUSTERS);
-  console.log(`[db] Seeded ${DEFAULT_CLUSTERS.length} clusters.`);
 }
 
 const CSV_FILES = [
   { file: 'india_master_leads.csv', defaultCluster: null, defaultCountry: 'India' },
   { file: 'india_workshop_leads.csv', defaultCluster: null, defaultCountry: 'India' },
   { file: 'vietnam_workshop_leads_v2.csv', defaultCluster: 'Vietnam', defaultCountry: 'Vietnam' },
+  { file: 'overseas_research_leads.csv', defaultCluster: null, defaultCountry: null },
 ];
 
 const CLUSTER_NORMALIZE = {
   'goa+mgr': 'Goa+Mangalore',
+  'goa': 'Goa+Mangalore',
   'goa+mangalore': 'Goa+Mangalore',
   'mangalore': 'Goa+Mangalore',
   'hills': 'Mussoorie+Dehradun',
@@ -158,15 +164,19 @@ const CLUSTER_NORMALIZE = {
   'kerala': 'Kerala',
   'northeast': 'Northeast',
   'vietnam': 'Vietnam',
+  'malaysia': 'Malaysia+SriLanka',
+  'sri lanka': 'Malaysia+SriLanka',
+  'srilanka': 'Malaysia+SriLanka',
+  'malaysia+srilanka': 'Malaysia+SriLanka',
 };
 
-function normalizeCluster(raw, defaultCluster) {
+export function normalizeCluster(raw, defaultCluster) {
   if (!raw) return defaultCluster || 'Northeast';
   const key = String(raw).trim().toLowerCase();
   return CLUSTER_NORMALIZE[key] || raw;
 }
 
-function normalizePriority(raw) {
+export function normalizePriority(raw) {
   if (!raw) return 'Medium';
   const p = String(raw).trim().toLowerCase();
   if (p === 'highest') return 'Highest';
@@ -176,7 +186,7 @@ function normalizePriority(raw) {
   return raw;
 }
 
-function normalizeArchetype(raw) {
+export function normalizeArchetype(raw) {
   if (!raw) return 'contemporary_academy';
   const a = String(raw).trim().toLowerCase();
   if (a === 'do_not_use_instantly' || a === 'hw' || a === 'hand_write') return 'church_choir';
@@ -184,7 +194,7 @@ function normalizeArchetype(raw) {
   return a;
 }
 
-function normalizeSendVia(rawArchetype, rawSendVia) {
+export function normalizeSendVia(rawArchetype, rawSendVia) {
   if (rawSendVia) {
     const s = String(rawSendVia).trim().toUpperCase();
     if (s === 'DO_NOT_USE_INSTANTLY' || s === 'INSTANTLY_OK') return s;
@@ -195,7 +205,7 @@ function normalizeSendVia(rawArchetype, rawSendVia) {
   return 'INSTANTLY_OK';
 }
 
-function pickEmail(row) {
+export function pickEmail(row) {
   const cands = [row.contact_email, row.email].filter(Boolean);
   for (const c of cands) {
     const t = String(c).trim();
@@ -204,7 +214,7 @@ function pickEmail(row) {
   return null;
 }
 
-function pickName(row) {
+export function pickName(row) {
   if (row.contact_name) return row.contact_name;
   if (row.contact_person) return row.contact_person;
   const fn = row.first_name?.trim();
@@ -213,16 +223,43 @@ function pickName(row) {
   return null;
 }
 
-function pickInstitution(row) {
+export function pickInstitution(row) {
   return row.institution_name || row.company_name || row.name || null;
 }
 
-function pickLanguageConfidence(row) {
+export function pickLanguageConfidence(row) {
   const raw = row.language_confidence || row.language;
   if (!raw) return 'high';
   const t = String(raw).trim().toLowerCase();
   if (t === 'high' || t === 'medium' || t === 'low') return t;
   return 'high';
+}
+
+export function leadFromCsvRow(row, defaults = {}) {
+  const institution = pickInstitution(row);
+  if (!institution) return null;
+  const archetype = normalizeArchetype(row.archetype);
+  return {
+    cluster: normalizeCluster(row.cluster, defaults.defaultCluster),
+    city: row.city || null,
+    state: row.state || null,
+    country: row.country || defaults.defaultCountry || 'India',
+    institution_name: institution,
+    archetype,
+    contact_name: pickName(row),
+    contact_email: pickEmail(row),
+    instagram_handle: row.instagram_handle || row.instagram || null,
+    phone: row.phone || null,
+    website: row.website || null,
+    recommended_topic: row.recommended_topic || null,
+    priority: normalizePriority(row.priority),
+    personalized_hook: row.personalized_hook || null,
+    format_recommendation: row.format_recommendation || null,
+    language_confidence: pickLanguageConfidence(row),
+    notes: row.notes || null,
+    send_via: normalizeSendVia(row.archetype, row.send_via),
+    verified: row.verified || null,
+  };
 }
 
 export function autoImportCsvs() {
@@ -246,35 +283,31 @@ export function autoImportCsvs() {
       const fp = path.join(DATA_DIR, file);
       if (!fs.existsSync(fp)) continue;
       const csvRaw = fs.readFileSync(fp, 'utf8');
-      const rows = parse(csvRaw, { columns: true, skip_empty_lines: true, trim: true, relax_column_count: true });
+      const rows = parse(csvRaw, { columns: true, skip_empty_lines: true, trim: true });
       for (const row of rows) {
-        const institution = pickInstitution(row);
-        if (!institution) { skipped++; continue; }
-        const city = row.city || null;
-        if (dupCheck.get(institution, city)) { skipped++; continue; }
-        const cluster = normalizeCluster(row.cluster, defaultCluster);
-        const archetype = normalizeArchetype(row.archetype);
-        const sendVia = normalizeSendVia(row.archetype, row.send_via);
+        const lead = leadFromCsvRow(row, { defaultCluster, defaultCountry });
+        if (!lead) { skipped++; continue; }
+        if (dupCheck.get(lead.institution_name, lead.city)) { skipped++; continue; }
         insert.run(
-          cluster,
-          city,
-          row.state || null,
-          row.country || defaultCountry || 'India',
-          institution,
-          archetype,
-          pickName(row),
-          pickEmail(row),
-          row.instagram_handle || row.instagram || null,
-          row.phone || null,
-          row.website || null,
-          row.recommended_topic || null,
-          normalizePriority(row.priority),
-          row.personalized_hook || null,
-          row.format_recommendation || null,
-          pickLanguageConfidence(row),
-          row.notes || null,
-          sendVia,
-          row.verified || null
+          lead.cluster,
+          lead.city,
+          lead.state,
+          lead.country,
+          lead.institution_name,
+          lead.archetype,
+          lead.contact_name,
+          lead.contact_email,
+          lead.instagram_handle,
+          lead.phone,
+          lead.website,
+          lead.recommended_topic,
+          lead.priority,
+          lead.personalized_hook,
+          lead.format_recommendation,
+          lead.language_confidence,
+          lead.notes,
+          lead.send_via,
+          lead.verified
         );
         added++;
       }

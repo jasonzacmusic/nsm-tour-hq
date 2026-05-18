@@ -33,12 +33,12 @@ export default function Dashboard() {
   const overdue = followups.filter(f => new Date(f.due_date) <= new Date());
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const contactable = stats?.by_cluster?.reduce((a, c) => a + c.total, 0) || 0;
-  const handwrite = stats?.by_archetype?.find(a => a.archetype === 'church_choir')?.c || 0;
+  const handwrite = stats?.handwrite || 0;
 
   const tiles = [
     { k: 'Total leads', v: stats?.total_leads, sub: `${clusters.length} clusters`, accent: 'gold' },
-    { k: 'Emails sent', v: stats?.emails_sent, sub: 'all campaigns', accent: 'paper' },
-    { k: 'Reply rate', v: stats != null ? `${stats?.reply_rate ?? 0}%` : null, sub: 'of contacted', accent: 'sage' },
+    { k: 'Instantly ready', v: stats?.instantly_ready, sub: 'has email + OK routing', accent: 'sage' },
+    { k: 'Needs research', v: stats?.needs_verification, sub: `${stats?.missing_email ?? 0} missing email`, accent: 'paper' },
     { k: 'Hand-write', v: handwrite, sub: 'delicate contacts', accent: 'rust' },
   ];
 
@@ -93,6 +93,17 @@ export default function Dashboard() {
             <span className="text-paper-dim ml-2">Time to nudge.</span>
           </div>
           <Link to="/email" className="eyebrow eyebrow-rust hover:text-rust-hi">Open studio →</Link>
+        </div>
+      )}
+
+      {stats?.invalid_send_via > 0 && (
+        <div className="mx-12 mb-8 border border-rust/60 bg-rust/10 px-5 py-3 rounded flex items-center gap-3">
+          <AlertTriangle size={16} className="text-rust-hi" />
+          <div className="flex-1 text-[13px] text-paper">
+            <span className="font-semibold">{stats.invalid_send_via} lead{stats.invalid_send_via > 1 ? 's have' : ' has'} invalid send routing.</span>
+            <span className="text-paper-dim ml-2">Fix before exporting to Instantly.</span>
+          </div>
+          <Link to="/leads" className="eyebrow eyebrow-rust hover:text-rust-hi">Open leads →</Link>
         </div>
       )}
 

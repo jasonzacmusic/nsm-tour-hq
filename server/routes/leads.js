@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
-import { db } from '../db.js';
+import { db, leadFromCsvRow } from '../db.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -29,9 +29,13 @@ router.get('/', (req, res) => {
   if (send_via)  { where.push('send_via = ?');  params.push(send_via); }
   if (language_confidence) { where.push('language_confidence = ?'); params.push(language_confidence); }
   if (search) {
-    where.push('(institution_name LIKE ? OR city LIKE ? OR contact_name LIKE ? OR notes LIKE ?)');
+    where.push(`(
+      institution_name LIKE ? OR city LIKE ? OR country LIKE ? OR contact_name LIKE ?
+      OR contact_email LIKE ? OR website LIKE ? OR recommended_topic LIKE ?
+      OR personalized_hook LIKE ? OR notes LIKE ?
+    )`);
     const q = `%${search}%`;
-    params.push(q, q, q, q);
+    params.push(q, q, q, q, q, q, q, q, q);
   }
   const sql = `SELECT * FROM leads ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY
     CASE priority WHEN 'Highest' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4 ELSE 5 END,
@@ -84,7 +88,7 @@ router.post('/import', upload.single('file'), (req, res) => {
   const csvRaw = req.file.buffer.toString('utf8');
   let rows;
   try {
-    rows = parse(csvRaw, { columns: true, skip_empty_lines: true, trim: true, relax_column_count: true });
+    rows = parse(csvRaw, { columns: true, skip_empty_lines: true, trim: true });
   } catch (e) {
     return res.status(400).json({ error: 'CSV parse error: ' + e.message });
   }
@@ -98,30 +102,29 @@ router.post('/import', upload.single('file'), (req, res) => {
   let added = 0, skipped = 0;
   const tx = db.transaction(() => {
     for (const r of rows) {
-      const institution = r.institution_name || r.company_name || r.name;
-      if (!institution) { skipped++; continue; }
-      const city = r.city || null;
-      if (dup.get(institution, city)) { skipped++; continue; }
+      const lead = leadFromCsvRow(r, { defaultCluster: 'Northeast', defaultCountry: 'India' });
+      if (!lead) { skipped++; continue; }
+      if (dup.get(lead.institution_name, lead.city)) { skipped++; continue; }
       insert.run(
-        r.cluster || 'Northeast',
-        city,
-        r.state || null,
-        r.country || 'India',
-        institution,
-        r.archetype || 'contemporary_academy',
-        r.contact_name || r.contact_person || [r.first_name, r.last_name].filter(Boolean).join(' ') || null,
-        r.contact_email || r.email || null,
-        r.instagram_handle || r.instagram || null,
-        r.phone || null,
-        r.website || null,
-        r.recommended_topic || null,
-        r.priority || 'Medium',
-        r.personalized_hook || null,
-        r.format_recommendation || null,
-        r.language_confidence || r.language || 'high',
-        r.notes || null,
-        r.send_via || 'INSTANTLY_OK',
-        r.verified || null
+        lead.cluster,
+        lead.city,
+        lead.state,
+        lead.country,
+        lead.institution_name,
+        lead.archetype,
+        lead.contact_name,
+        lead.contact_email,
+        lead.instagram_handle,
+        lead.phone,
+        lead.website,
+        lead.recommended_topic,
+        lead.priority,
+        lead.personalized_hook,
+        lead.format_recommendation,
+        lead.language_confidence,
+        lead.notes,
+        lead.send_via,
+        lead.verified
       );
       added++;
     }
