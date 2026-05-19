@@ -36,10 +36,12 @@ export default function SchoolFinder() {
         cluster: form.cluster || r.cluster || 'Northeast', city: r.city || form.city, country: form.country,
         institution_name: r.institution_name, archetype: r.archetype || 'contemporary_academy',
         contact_name: r.contact_name || null, contact_email: r.contact_email || null,
-        instagram_handle: r.instagram_handle || null, website: r.website || null,
+        instagram_handle: r.instagram_handle || null, linkedin_url: r.linkedin_url || null,
+        whatsapp: r.whatsapp || null, website: r.website || null,
         recommended_topic: r.recommended_topic || null, priority: r.priority || 'Medium',
         personalized_hook: r.personalized_hook || null, send_via: r.send_via || 'INSTANTLY_OK',
-        notes: r.notes || null, language_confidence: r.confidence || 'high',
+        notes: [r.notes, r.sources?.length ? `Sources: ${r.sources.join(' | ')}` : null].filter(Boolean).join('\n'),
+        language_confidence: r.confidence || 'high',
       });
       setAdded(a => ({ ...a, [idx]: true }));
     } catch (e) { alert('Add failed: ' + e.message); }
@@ -125,7 +127,7 @@ export default function SchoolFinder() {
                   <div className="text-[11px] text-muted mt-1.5">{r.city} · <span className="uppercase tracking-wider">{r.archetype}</span></div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {r.confidence === 'low' && <span className="text-[9px] px-2 py-0.5 rounded-sm bg-gold/15 border border-gold/50 text-gold font-bold uppercase tracking-widest">Verify</span>}
+                  {r.confidence !== 'high' && <span className="text-[9px] px-2 py-0.5 rounded-sm bg-gold/15 border border-gold/50 text-gold font-bold uppercase tracking-widest">Verify</span>}
                   {added[i]
                     ? <span className="text-[12px] text-sage flex items-center gap-1"><Check size={13} /> Added</span>
                     : <button onClick={() => addLead(i)} className="btn-ghost"><Plus size={12} /> Add to roster</button>}
@@ -135,12 +137,19 @@ export default function SchoolFinder() {
                 <Meta k="Contact" v={r.contact_name} />
                 <Meta k="Email" v={r.contact_email} />
                 <Meta k="Instagram" v={r.instagram_handle} />
+                <Meta k="LinkedIn" v={r.linkedin_url} />
+                <Meta k="WhatsApp" v={r.whatsapp} />
                 <Meta k="Topic" v={r.recommended_topic} />
               </div>
               {r.personalized_hook && (
                 <p className="text-[13px] text-paper mt-4 italic leading-relaxed border-l-2 border-gold/30 pl-3">{r.personalized_hook}</p>
               )}
               {r.notes && <p className="text-[11px] text-muted mt-2">{r.notes}</p>}
+              {r.sources?.length > 0 && (
+                <div className="text-[11px] text-muted mt-3 flex gap-2 flex-wrap">
+                  {r.sources.map((s, idx) => <a key={`${s}-${idx}`} href={s} target="_blank" rel="noreferrer" className="text-gold underline decoration-dotted">Source {idx + 1}</a>)}
+                </div>
+              )}
             </div>
           ))}
         </div>

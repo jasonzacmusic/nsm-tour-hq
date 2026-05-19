@@ -19,10 +19,12 @@ When given a city, country, and institution type, find real, currently active in
 - priority (Highest/High/Medium/Low)
 - notes (anything else relevant)
 - confidence (high/medium/low — your certainty they are currently active)
+- sources (array of source URLs you used to verify the institution is active in 2026)
 
 Return ONLY valid JSON array. No preamble, no markdown.
-Only include institutions you can verify are currently active.
-Flag uncertain ones with confidence: "low".
+Only include institutions you can verify are currently active in 2026.
+If sources are missing, stale, or weak, set confidence: "low", priority: "Medium" or "Low", and send_via: "DO_NOT_USE_INSTANTLY".
+Never mark priority Highest/High or send_via INSTANTLY_OK unless confidence is high and sources include an official site or official social profile.
 
 Jason's 8 workshop topics:
 1. Vocal Harmony
@@ -57,8 +59,9 @@ router.post('/search', async (req, res) => {
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 8 }],
     });
-    const text = msg.content?.[0]?.type === 'text' ? msg.content[0].text : '';
+    const { text, citations } = extractTextAndCitations(msg.content || []);
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     let results = [];
     if (jsonMatch) {
@@ -66,11 +69,42 @@ router.post('/search', async (req, res) => {
         return res.status(500).json({ error: 'Claude returned invalid JSON', raw: text });
       }
     }
-    res.json({ results, raw: text });
+    res.json({ results: gateResults(results), citations, raw: text });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
+function extractTextAndCitations(content) {
+  const chunks = [];
+  const citations = [];
+  for (const block of content) {
+    if (block.type === 'text') {
+      chunks.push(block.text || '');
+      for (const c of block.citations || []) {
+        if (c.url) citations.push({ url: c.url, title: c.title || '', cited_text: c.cited_text || '' });
+      }
+    }
+  }
+  return { text: chunks.join('\n'), citations };
+}
+
+function gateResults(results) {
+  return (Array.isArray(results) ? results : []).map((r) => {
+    const sources = Array.isArray(r.sources) ? r.sources.filter(Boolean) : [];
+    const confidence = String(r.confidence || '').toLowerCase();
+    const verifiedHigh = confidence === 'high' && sources.length > 0;
+    if (verifiedHigh) return { ...r, confidence: 'high' };
+    return {
+      ...r,
+      confidence: confidence === 'medium' ? 'medium' : 'low',
+      priority: ['Highest', 'High'].includes(r.priority) ? 'Medium' : (r.priority || 'Low'),
+      send_via: 'DO_NOT_USE_INSTANTLY',
+      notes: [r.notes, 'Verification gate: not high-confidence with source URLs, so excluded from Instantly.'].filter(Boolean).join(' '),
+      sources,
+    };
+  });
+}
 
 router.post('/generate-hook', async (req, res) => {
   const { institution_name, archetype, website, city, notes } = req.body || {};
