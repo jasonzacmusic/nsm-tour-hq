@@ -75,7 +75,7 @@ export default function Leads() {
     if (!file) return;
     try {
       const r = await api.leads.importCsv(file);
-      alert(`Import: added ${r.added}, skipped ${r.skipped} (of ${r.total}).`);
+      alert(`Import: added ${r.added}, updated ${r.updated}, skipped ${r.skipped} (of ${r.total}).`);
       load();
     } catch (err) { alert('Import error: ' + err.message); }
     e.target.value = '';
@@ -241,6 +241,8 @@ function LeadDetail({ lead }) {
         <DetailRow k="Format" v={full.format_recommendation} />
         <DetailRow k="Website" v={full.website && <a href={full.website} target="_blank" rel="noreferrer" className="text-gold hover:text-gold-hi underline decoration-dotted">{full.website}</a>} />
         <DetailRow k="Instagram" v={full.instagram_handle} />
+        <DetailRow k="LinkedIn" v={full.linkedin_url && <a href={full.linkedin_url} target="_blank" rel="noreferrer" className="text-gold hover:text-gold-hi underline decoration-dotted">{full.linkedin_url}</a>} />
+        <DetailRow k="WhatsApp" v={full.whatsapp} />
         <DetailRow k="Phone" v={full.phone} />
         <DetailRow k="Notes" v={full.notes} />
       </div>
@@ -280,7 +282,7 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
     city: lead.city || '', state: lead.state || '', country: lead.country || 'India',
     institution_name: lead.institution_name || '', archetype: lead.archetype || 'contemporary_academy',
     contact_name: lead.contact_name || '', contact_email: lead.contact_email || '',
-    instagram_handle: lead.instagram_handle || '', phone: lead.phone || '', website: lead.website || '',
+    instagram_handle: lead.instagram_handle || '', linkedin_url: lead.linkedin_url || '', whatsapp: lead.whatsapp || '', phone: lead.phone || '', website: lead.website || '',
     recommended_topic: lead.recommended_topic || '', priority: lead.priority || 'Medium',
     personalized_hook: lead.personalized_hook || '', format_recommendation: lead.format_recommendation || '',
     language_confidence: lead.language_confidence || 'high', status: lead.status || 'not_contacted',
@@ -355,6 +357,8 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
             <Field label="Contact name"><input value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} className="input" /></Field>
             <Field label="Contact email"><input value={form.contact_email} onChange={e => setForm({ ...form, contact_email: e.target.value })} className="input" /></Field>
             <Field label="Instagram"><input value={form.instagram_handle} onChange={e => setForm({ ...form, instagram_handle: e.target.value })} className="input" /></Field>
+            <Field label="LinkedIn"><input value={form.linkedin_url} onChange={e => setForm({ ...form, linkedin_url: e.target.value })} className="input" /></Field>
+            <Field label="WhatsApp"><input value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })} className="input" /></Field>
             <Field label="Phone"><input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input" /></Field>
           </div>
           <Field label="Website"><input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} className="input" /></Field>

@@ -1,14 +1,14 @@
 import express from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
-import { db, leadFromCsvRow } from '../db.js';
+import { db, leadFromCsvRow, upsertImportedLead, resyncLeadsFromDisk, DEFAULT_SOURCE_DATA_DIR } from '../db.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const LEAD_COLUMNS = [
   'cluster','city','state','country','institution_name','archetype',
-  'contact_name','contact_email','instagram_handle','phone','website',
+  'contact_name','contact_email','instagram_handle','linkedin_url','whatsapp','phone','website',
   'recommended_topic','priority','personalized_hook','format_recommendation',
   'language_confidence','status','notes','send_via','verified'
 ];
@@ -31,11 +31,11 @@ router.get('/', (req, res) => {
   if (search) {
     where.push(`(
       institution_name LIKE ? OR city LIKE ? OR country LIKE ? OR contact_name LIKE ?
-      OR contact_email LIKE ? OR website LIKE ? OR recommended_topic LIKE ?
+      OR contact_email LIKE ? OR linkedin_url LIKE ? OR whatsapp LIKE ? OR website LIKE ? OR recommended_topic LIKE ?
       OR personalized_hook LIKE ? OR notes LIKE ?
     )`);
     const q = `%${search}%`;
-    params.push(q, q, q, q, q, q, q, q, q);
+    params.push(q, q, q, q, q, q, q, q, q, q, q);
   }
   const sql = `SELECT * FROM leads ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY
     CASE priority WHEN 'Highest' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4 ELSE 5 END,
@@ -92,45 +92,25 @@ router.post('/import', upload.single('file'), (req, res) => {
   } catch (e) {
     return res.status(400).json({ error: 'CSV parse error: ' + e.message });
   }
-  const dup = db.prepare("SELECT 1 FROM leads WHERE institution_name = ? AND COALESCE(city,'') = COALESCE(?, '')");
-  const insert = db.prepare(`
-    INSERT INTO leads (cluster, city, state, country, institution_name, archetype,
-      contact_name, contact_email, instagram_handle, phone, website, recommended_topic,
-      priority, personalized_hook, format_recommendation, language_confidence, notes, send_via, verified)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `);
-  let added = 0, skipped = 0;
+  let added = 0, updated = 0, skipped = 0;
   const tx = db.transaction(() => {
     for (const r of rows) {
       const lead = leadFromCsvRow(r, { defaultCluster: 'Northeast', defaultCountry: 'India' });
       if (!lead) { skipped++; continue; }
-      if (dup.get(lead.institution_name, lead.city)) { skipped++; continue; }
-      insert.run(
-        lead.cluster,
-        lead.city,
-        lead.state,
-        lead.country,
-        lead.institution_name,
-        lead.archetype,
-        lead.contact_name,
-        lead.contact_email,
-        lead.instagram_handle,
-        lead.phone,
-        lead.website,
-        lead.recommended_topic,
-        lead.priority,
-        lead.personalized_hook,
-        lead.format_recommendation,
-        lead.language_confidence,
-        lead.notes,
-        lead.send_via,
-        lead.verified
-      );
-      added++;
+      upsertImportedLead(lead) === 'updated' ? updated++ : added++;
     }
   });
   tx();
-  res.json({ added, skipped, total: rows.length });
+  res.json({ added, updated, skipped, total: rows.length });
+});
+
+router.post('/resync', (req, res) => {
+  const sourceDir = req.body?.source_dir || process.env.INSTANTLY_OUTREACH_DATA_DIR || DEFAULT_SOURCE_DATA_DIR;
+  try {
+    res.json(resyncLeadsFromDisk(sourceDir));
+  } catch (e) {
+    res.status(400).json({ ok: false, sourceDir, error: e.message });
+  }
 });
 
 function pickFields(body, cols) {

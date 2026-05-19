@@ -15,8 +15,9 @@ export default function Settings() {
     send_window_start: '09:00',
     send_window_end: '17:00',
   });
-  const [gmailTest, setGmailTest] = useState(null);
+  const [instantTest, setInstantTest] = useState(null);
   const [aiTest, setAiTest] = useState(null);
+  const [syncResult, setSyncResult] = useState(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -25,8 +26,9 @@ export default function Settings() {
   }, []);
 
   const save = async () => { await api.settings.put(settings); setSaved(true); setTimeout(() => setSaved(false), 1500); };
-  const testGmail = async () => { setGmailTest({ pending: true }); setGmailTest(await api.emails.testConnection()); };
+  const testInstant = async () => { setInstantTest({ pending: true }); setInstantTest(await api.emails.testConnection()); };
   const testAi = async () => { setAiTest({ pending: true }); setAiTest(await api.finder.testConnection()); };
+  const resyncLeads = async () => { setSyncResult({ pending: true }); setSyncResult(await api.leads.resync()); };
 
   return (
     <div className="min-h-full">
@@ -37,7 +39,7 @@ export default function Settings() {
 
       <div className="px-12 py-8 max-w-3xl space-y-6">
         <Section title="Connections" eyebrow="Required before sending">
-          <ConnRow label="Gmail SMTP" ok={health?.gmailConfigured} onTest={testGmail} test={gmailTest} />
+          <ConnRow label="Instantly API" ok={health?.instantlyConfigured} onTest={testInstant} test={instantTest} />
           <ConnRow label="Anthropic API" ok={health?.anthropicConfigured} onTest={testAi} test={aiTest} />
           <div className="text-[12px] text-muted hairline-t pt-3 mt-1">
             Set keys in <code className="text-gold font-mono">~/Documents/Claude Code/nsm-tour-hq/.env</code> then restart the server.
@@ -47,7 +49,7 @@ export default function Settings() {
         <Section title="Sender profile" eyebrow="Used in every email signature">
           <div className="grid grid-cols-2 gap-4">
             <Field label="Display name" v={settings.from_name} k="from_name" set={setSettings} s={settings} />
-            <Field label="Sending email" v={settings.sender_email} k="sender_email" set={setSettings} s={settings} />
+            <ReadOnlyField label="Sending email" v={health?.instantlySender || 'workshops@jasonzacmusic.com'} />
             <Field label="WhatsApp / phone" v={settings.phone_whatsapp} k="phone_whatsapp" set={setSettings} s={settings} />
             <Field label="YouTube URL" v={settings.youtube_url} k="youtube_url" set={setSettings} s={settings} />
             <Field label="Website" v={settings.website} k="website" set={setSettings} s={settings} />
@@ -61,6 +63,21 @@ export default function Settings() {
             <Field label="From" v={settings.send_window_start} k="send_window_start" set={setSettings} s={settings} />
             <Field label="To" v={settings.send_window_end} k="send_window_end" set={setSettings} s={settings} />
           </div>
+        </Section>
+
+        <Section title="Lead source" eyebrow="Research sync">
+          <ReadOnlyField label="Source directory" v={health?.sourceDataDir || '—'} />
+          <div className="text-[12px] text-muted">
+            Authoritative CSVs are pulled from the Instantly outreach project when that folder exists.
+          </div>
+          <button onClick={resyncLeads} className="btn-ghost"><RefreshCw size={13} />Re-sync from disk</button>
+          {syncResult && !syncResult.pending && (
+            <div className={`text-[12px] px-3 py-2 rounded ${syncResult.ok ? 'bg-sage/10 text-sage' : 'bg-rust/10 text-rust-hi'}`}>
+              {syncResult.ok
+                ? `Added ${syncResult.added}, updated ${syncResult.updated}, skipped ${syncResult.skipped}`
+                : `${syncResult.error}: ${syncResult.sourceDir}`}
+            </div>
+          )}
         </Section>
 
         <div className="flex items-center gap-3">
@@ -89,6 +106,15 @@ function Field({ label, v, k, set, s }) {
     <div className="flex-1">
       <label className="eyebrow block mb-1.5">{label}</label>
       <input className="input" value={v} onChange={e => set({ ...s, [k]: e.target.value })} />
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, v }) {
+  return (
+    <div className="flex-1">
+      <label className="eyebrow block mb-1.5">{label}</label>
+      <input className="input opacity-75" value={v} readOnly />
     </div>
   );
 }

@@ -7,8 +7,13 @@ import { parse } from 'csv-parse/sync';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+export const DEFAULT_SOURCE_DATA_DIR = path.join(
+  process.env.INSTANTLY_OUTREACH_DIR || '/Users/nphmacmini/Documents/Claude/instantly-outreach',
+  'leads',
+  'raw'
+);
 
-export const db = new Database(path.join(DATA_DIR, 'nsm_tour.db'));
+export const db = new Database(process.env.NSM_TOUR_DB_PATH || path.join(DATA_DIR, 'nsm_tour.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -25,6 +30,8 @@ export function migrate() {
       contact_name TEXT,
       contact_email TEXT,
       instagram_handle TEXT,
+      linkedin_url TEXT,
+      whatsapp TEXT,
       phone TEXT,
       website TEXT,
       recommended_topic TEXT,
@@ -92,9 +99,21 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_leads_archetype ON leads(archetype);
     CREATE INDEX IF NOT EXISTS idx_leads_priority ON leads(priority);
     CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_institution_city ON leads(institution_name, city);
     CREATE INDEX IF NOT EXISTS idx_email_log_lead ON email_log(lead_id);
     CREATE INDEX IF NOT EXISTS idx_followups_due ON followups(due_date, status);
   `);
+  ensureColumn('leads', 'linkedin_url', 'TEXT');
+  ensureColumn('leads', 'whatsapp', 'TEXT');
+  ensureColumn('email_log', 'touch_number', 'INTEGER DEFAULT 1');
+  ensureColumn('email_log', 'instant_campaign_id', 'TEXT');
+  ensureColumn('email_log', 'instant_lead_id', 'TEXT');
+  ensureColumn('followups', 'touch_number', 'INTEGER DEFAULT 2');
+}
+
+function ensureColumn(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 const DEFAULT_CLUSTERS = [
@@ -189,8 +208,7 @@ export function normalizePriority(raw) {
 export function normalizeArchetype(raw) {
   if (!raw) return 'contemporary_academy';
   const a = String(raw).trim().toLowerCase();
-  if (a === 'do_not_use_instantly' || a === 'hw' || a === 'hand_write') return 'church_choir';
-  if (a === 'anchor' || a === 'std') return 'contemporary_academy';
+  if (a === 'do_not_use_instantly' || a === 'hw' || a === 'hand_write' || a === 'anchor' || a === 'std') return 'contemporary_academy';
   return a;
 }
 
@@ -212,6 +230,14 @@ export function pickEmail(row) {
     if (t && t.includes('@')) return t;
   }
   return null;
+}
+
+function pickWhatsapp(row) {
+  return row.whatsapp || row.whatsapp_mobile || row.whatsapp_number || row.mobile || null;
+}
+
+function pickLinkedin(row) {
+  return row.linkedin_url || row.linkedin || row.linkedin_profile || null;
 }
 
 export function pickName(row) {
@@ -249,6 +275,8 @@ export function leadFromCsvRow(row, defaults = {}) {
     contact_name: pickName(row),
     contact_email: pickEmail(row),
     instagram_handle: row.instagram_handle || row.instagram || null,
+    linkedin_url: pickLinkedin(row),
+    whatsapp: pickWhatsapp(row),
     phone: row.phone || null,
     website: row.website || null,
     recommended_topic: row.recommended_topic || null,
@@ -262,22 +290,55 @@ export function leadFromCsvRow(row, defaults = {}) {
   };
 }
 
+const LEAD_COLUMNS = [
+  'cluster', 'city', 'state', 'country', 'institution_name', 'archetype',
+  'contact_name', 'contact_email', 'instagram_handle', 'linkedin_url', 'whatsapp',
+  'phone', 'website', 'recommended_topic', 'priority', 'personalized_hook',
+  'format_recommendation', 'language_confidence', 'notes', 'send_via', 'verified',
+];
+
+const insertLeadStmt = () => db.prepare(`
+  INSERT INTO leads (${LEAD_COLUMNS.join(', ')})
+  VALUES (${LEAD_COLUMNS.map(() => '?').join(',')})
+`);
+
+const updateLeadStmt = () => db.prepare(`
+  UPDATE leads SET
+    cluster = ?, city = ?, state = ?, country = ?, institution_name = ?, archetype = ?,
+    contact_name = ?, contact_email = ?, instagram_handle = ?, linkedin_url = ?, whatsapp = ?,
+    phone = ?, website = ?, recommended_topic = ?, priority = ?, personalized_hook = ?,
+    format_recommendation = ?, language_confidence = ?, notes = ?, send_via = ?, verified = ?,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE id = ?
+`);
+
+function leadValues(lead) {
+  return LEAD_COLUMNS.map(c => lead[c]);
+}
+
+function upsertLead(lead, insert, update) {
+  const existing = findLead(lead.institution_name, lead.city);
+  if (existing) {
+    update.run(...leadValues(lead), existing.id);
+    return 'updated';
+  }
+  insert.run(...leadValues(lead));
+  return 'added';
+}
+
+export function upsertImportedLead(lead) {
+  return upsertLead(lead, insertLeadStmt(), updateLeadStmt());
+}
+
 export function autoImportCsvs() {
   const existing = db.prepare('SELECT COUNT(*) as c FROM leads').get().c;
   if (existing > 0) {
     console.log(`[db] Skipping CSV import — ${existing} leads already present.`);
     return { skipped: true };
   }
-  const dupCheck = db.prepare("SELECT 1 FROM leads WHERE institution_name = ? AND COALESCE(city,'') = COALESCE(?, '')");
-  const insert = db.prepare(`
-    INSERT INTO leads (
-      cluster, city, state, country, institution_name, archetype,
-      contact_name, contact_email, instagram_handle, phone, website,
-      recommended_topic, priority, personalized_hook, format_recommendation,
-      language_confidence, notes, send_via, verified
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `);
-  let added = 0, skipped = 0;
+  const insert = insertLeadStmt();
+  const update = updateLeadStmt();
+  let added = 0, updated = 0, skipped = 0;
   const tx = db.transaction(() => {
     for (const { file, defaultCluster, defaultCountry } of CSV_FILES) {
       const fp = path.join(DATA_DIR, file);
@@ -287,35 +348,74 @@ export function autoImportCsvs() {
       for (const row of rows) {
         const lead = leadFromCsvRow(row, { defaultCluster, defaultCountry });
         if (!lead) { skipped++; continue; }
-        if (dupCheck.get(lead.institution_name, lead.city)) { skipped++; continue; }
-        insert.run(
-          lead.cluster,
-          lead.city,
-          lead.state,
-          lead.country,
-          lead.institution_name,
-          lead.archetype,
-          lead.contact_name,
-          lead.contact_email,
-          lead.instagram_handle,
-          lead.phone,
-          lead.website,
-          lead.recommended_topic,
-          lead.priority,
-          lead.personalized_hook,
-          lead.format_recommendation,
-          lead.language_confidence,
-          lead.notes,
-          lead.send_via,
-          lead.verified
-        );
-        added++;
+        upsertLead(lead, insert, update) === 'updated' ? updated++ : added++;
       }
     }
   });
   tx();
-  console.log(`[db] CSV import complete — added ${added}, skipped ${skipped}.`);
-  return { added, skipped };
+  console.log(`[db] CSV import complete — added ${added}, updated ${updated}, skipped ${skipped}.`);
+  return { added, updated, skipped };
+}
+
+export function findLead(institutionName, city) {
+  return db.prepare(`
+    SELECT id FROM leads
+    WHERE lower(institution_name) = lower(?)
+      AND lower(COALESCE(city, '')) = lower(COALESCE(?, ''))
+  `).get(institutionName, city || null);
+}
+
+export function resyncLeadsFromDisk(sourceDir = DEFAULT_SOURCE_DATA_DIR) {
+  if (!fs.existsSync(sourceDir)) {
+    return { ok: false, sourceDir, error: 'source directory not found', added: 0, updated: 0, skipped: 0 };
+  }
+  const files = fs.readdirSync(sourceDir).filter(f => f.toLowerCase().endsWith('.csv')).sort();
+  if (files.length === 0) {
+    return { ok: false, sourceDir, error: 'no CSV files found', added: 0, updated: 0, skipped: 0 };
+  }
+
+  const insert = insertLeadStmt();
+  const update = updateLeadStmt();
+
+  let added = 0, updated = 0, skipped = 0;
+  const perFile = [];
+  const tx = db.transaction(() => {
+    for (const file of files) {
+      const rows = parse(fs.readFileSync(path.join(sourceDir, file), 'utf8'), { columns: true, skip_empty_lines: true, trim: true });
+      let fileAdded = 0, fileUpdated = 0, fileSkipped = 0;
+      for (const row of rows) {
+        const lead = leadFromCsvRow(row, { defaultCluster: inferClusterFromFilename(file), defaultCountry: inferCountryFromFilename(file) });
+        if (!lead) { skipped++; fileSkipped++; continue; }
+        if (upsertLead(lead, insert, update) === 'updated') { updated++; fileUpdated++; } else { added++; fileAdded++; }
+      }
+      perFile.push({ file, rows: rows.length, added: fileAdded, updated: fileUpdated, skipped: fileSkipped });
+    }
+  });
+  tx();
+  return { ok: true, sourceDir, files: perFile, added, updated, skipped };
+}
+
+function inferCountryFromFilename(file) {
+  const f = file.toLowerCase();
+  if (f.includes('philippines')) return 'Philippines';
+  if (f.includes('malaysia')) return 'Malaysia';
+  if (f.includes('sri') || f.includes('lanka')) return 'Sri Lanka';
+  if (f.includes('thailand')) return 'Thailand';
+  if (f.includes('nepal')) return 'Nepal';
+  if (f.includes('vietnam')) return 'Vietnam';
+  if (f.includes('singapore')) return 'Singapore';
+  if (f.includes('uae') || f.includes('dubai')) return 'UAE';
+  if (f.includes('south') && f.includes('africa')) return 'South Africa';
+  return null;
+}
+
+function inferClusterFromFilename(file) {
+  const country = inferCountryFromFilename(file);
+  if (!country) return null;
+  if (country === 'Malaysia' || country === 'Sri Lanka') return 'Malaysia+SriLanka';
+  if (country === 'UAE') return 'Dubai/UAE';
+  if (country === 'South Africa') return 'South Africa';
+  return country;
 }
 
 export function initDb() {

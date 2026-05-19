@@ -7,7 +7,7 @@ const router = express.Router();
 const INSTANTLY_COLUMNS = [
   'email', 'first_name', 'last_name', 'company_name',
   'personalized_hook', 'city', 'country', 'website',
-  'phone', 'archetype', 'recommended_topic', 'priority', 'cluster', 'notes',
+  'phone', 'linkedin_url', 'whatsapp', 'archetype', 'recommended_topic', 'priority', 'cluster', 'notes',
 ];
 
 router.get('/csv', (req, res) => {
@@ -38,7 +38,9 @@ router.get('/csv', (req, res) => {
       city: r.city || '',
       country: r.country || '',
       website: r.website || '',
-      phone: r.phone || '',
+      phone: r.phone || r.whatsapp || '',
+      linkedin_url: r.linkedin_url || '',
+      whatsapp: r.whatsapp || '',
       archetype: r.archetype || '',
       recommended_topic: r.recommended_topic || '',
       priority: r.priority || '',
