@@ -5,17 +5,20 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
-import { initDb, db } from './db.js';
+import { initDb, db, DEFAULT_SOURCE_DATA_DIR } from './db.js';
+import { INSTANTLY_SENDER, instantlyConfigured } from './instantly.js';
 import leadsRouter from './routes/leads.js';
 import emailsRouter from './routes/emails.js';
 import campaignsRouter from './routes/campaigns.js';
 import finderRouter from './routes/finder.js';
 import exportRouter from './routes/export.js';
+import { startFollowupScheduler } from './followupScheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 
 initDb();
+startFollowupScheduler();
 
 const app = express();
 app.use(cors());
@@ -27,8 +30,11 @@ app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     leadCount,
-    gmailConfigured: !!process.env.GMAIL_APP_PASSWORD,
+    instantlyConfigured: instantlyConfigured(),
+    instantlySender: INSTANTLY_SENDER,
     anthropicConfigured: !!process.env.ANTHROPIC_API_KEY,
+    sourceDataDir: DEFAULT_SOURCE_DATA_DIR,
+    sourceDataDirExists: fs.existsSync(DEFAULT_SOURCE_DATA_DIR),
   });
 });
 
