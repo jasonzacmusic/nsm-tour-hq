@@ -15,19 +15,20 @@ Then open **http://localhost:5173** (Vite client; it proxies API calls to Expres
 
 - **Dashboard** — stats, cluster progress, priority queue, follow-ups
 - **Leads** — full CRUD, CSV import/export (Instantly-ready), filters
-- **Email Studio** — 6 archetype templates, variable substitution, bulk send (20/hr cap)
-- **School Finder AI** — Claude-powered institution research with personalised hooks
+- **Email Studio** — 6 archetype templates, variable substitution, Instantly campaign pushes
+- **School Finder AI** — Claude web-search research with source URLs and a confidence gate
 - **Remotion Studio** — 5 compositions: TourPromo (60s), InstagramReel (30s 9:16), WorkshopPoster (1080×1080), ClusterIntro (15s per region), StatsCard
 
 ## Environment
 
 Copy `.env.example` to `.env` and fill in:
 
-- `GMAIL_USER` — your sending Gmail address (already set to music@nathanielschool.com)
-- `GMAIL_APP_PASSWORD` — generate at https://myaccount.google.com/apppasswords ("App passwords")
-- `ANTHROPIC_API_KEY` — get from https://console.anthropic.com/
+- `INSTANTLY_API_KEY` — Instantly API token with campaign/account/lead scopes
+- `INSTANTLY_SENDER_EMAIL` — defaults to `workshops@jasonzacmusic.com`
+- `INSTANTLY_OUTREACH_DIR` — the authoritative research project root, expected to contain `leads/raw/*.csv`
+- `ANTHROPIC_API_KEY` — get from https://console.anthropic.com/; School Finder uses Claude web search
 
-The app runs without these — Email Studio and School Finder show clear errors until they're set.
+Cold workshop outreach must go through Instantly from `workshops@jasonzacmusic.com`. The app does not send cold mail through Gmail or `music@nathanielschool.com`.
 
 ## Data
 
@@ -35,8 +36,25 @@ CSVs in `server/data/` are auto-imported on first run:
 - `india_master_leads.csv` (richest schema)
 - `india_workshop_leads.csv`
 - `vietnam_workshop_leads_v2.csv`
+- `overseas_research_leads.csv`
 
-Duplicates are skipped (matched on institution name + city). Subsequent runs leave the DB alone — to re-seed, delete `server/data/nsm_tour.db`.
+Imports and re-syncs are idempotent on institution name + city. Use Settings -> Re-sync from disk, or:
+
+```bash
+curl -X POST http://localhost:3001/api/leads/resync \
+  -H 'Content-Type: application/json' \
+  -d '{"source_dir":"/Users/nphmacmini/Documents/Claude/instantly-outreach/leads/raw"}'
+```
+
+If the Instantly outreach folder is absent, re-sync reports that explicitly and leaves existing data untouched.
+
+## Tests
+
+```bash
+npm test
+```
+
+The smoke test covers CSV import idempotency, `send_via`/archetype normalization, and the Instantly export filter.
 
 ## Remotion
 
