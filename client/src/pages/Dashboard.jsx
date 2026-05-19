@@ -12,20 +12,23 @@ export default function Dashboard() {
   const [priorityQueue, setPriorityQueue] = useState([]);
   const [followups, setFollowups] = useState([]);
   const [recent, setRecent] = useState([]);
+  const [instantStatus, setInstantStatus] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, c, q, f, r] = await Promise.all([
+        const [s, c, q, f, r, instant] = await Promise.all([
           api.export.stats(), api.clusters(),
           api.leads.list({ priority: 'Highest', status: 'not_contacted' }),
           api.emails.followups(), api.emails.list(),
+          api.emails.instantStatus().catch(e => ({ ok: false, error: e.message })),
         ]);
         setStats({ ...s, followups_due: f.filter(x => new Date(x.due_date) <= new Date()).length });
         setClusters(c);
         setPriorityQueue(q.slice(0, 6));
         setFollowups(f);
         setRecent(r.slice(0, 8));
+        setInstantStatus(instant);
       } catch (e) { console.error(e); }
     })();
   }, []);
@@ -106,6 +109,19 @@ export default function Dashboard() {
           <Link to="/leads" className="eyebrow eyebrow-rust hover:text-rust-hi">Open leads →</Link>
         </div>
       )}
+
+      <section className="px-12 mb-8">
+        <div className={`border px-5 py-3 rounded flex items-center gap-3 ${
+          instantStatus?.configured ? 'border-sage/50 bg-sage/10' : 'border-gold/50 bg-gold/10'
+        }`}>
+          <Mail size={16} className={instantStatus?.configured ? 'text-sage' : 'text-gold'} />
+          <div className="flex-1 text-[13px] text-paper">
+            <span className="font-semibold">Send rail: Instantly</span>
+            <span className="text-paper-dim ml-2">{instantStatus?.sender || 'workshops@jasonzacmusic.com'}</span>
+          </div>
+          <Link to="/settings" className="eyebrow hover:text-gold">Settings</Link>
+        </div>
+      </section>
 
       {/* ── STAT TILES ─────────────────────────────────────── */}
       <section className="px-12">

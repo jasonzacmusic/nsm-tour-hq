@@ -57,7 +57,7 @@ export default function Sidebar() {
       <div className="px-7 py-5 hairline-t space-y-3">
         <div className="eyebrow text-[9px]">System</div>
         <StatusRow label="Database" ok={!!health} count={health?.leadCount} />
-        <StatusRow label="Gmail SMTP" ok={health?.gmailConfigured} />
+        <StatusRow label="Instantly API" ok={health?.instantlyConfigured} />
         <StatusRow label="Claude API" ok={health?.anthropicConfigured} />
       </div>
 

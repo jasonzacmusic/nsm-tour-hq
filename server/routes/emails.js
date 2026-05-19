@@ -1,38 +1,47 @@
 import express from 'express';
-import nodemailer from 'nodemailer';
-import rateLimit from 'express-rate-limit';
 import { db } from '../db.js';
+import { INSTANTLY_SENDER, instantlyConfigured, instantlyRequest, leadToInstantly } from '../instantly.js';
 
 const router = express.Router();
 
-const sendLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 20,
-  message: { error: 'Rate limit: max 20 sends per hour.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-function getTransporter() {
-  if (!process.env.GMAIL_APP_PASSWORD) return null;
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
+function getEligibleLeads({ lead_ids, cluster, archetype }) {
+  const where = ["send_via = 'INSTANTLY_OK'", "COALESCE(contact_email, '') != ''"];
+  const params = [];
+  if (Array.isArray(lead_ids) && lead_ids.length) {
+    where.push(`id IN (${lead_ids.map(() => '?').join(',')})`);
+    params.push(...lead_ids);
+  }
+  if (cluster) { where.push('cluster = ?'); params.push(cluster); }
+  if (archetype) { where.push('archetype = ?'); params.push(archetype); }
+  return db.prepare(`SELECT * FROM leads WHERE ${where.join(' AND ')} ORDER BY cluster, institution_name`).all(...params);
 }
 
-function substituteVars(template, lead) {
-  if (!template) return '';
-  const firstName = (lead.contact_name || '').split(' ')[0] || 'there';
-  return String(template)
-    .replaceAll('{{first_name}}', firstName)
-    .replaceAll('{{company_name}}', lead.institution_name || '')
-    .replaceAll('{{personalized_hook}}', lead.personalized_hook || '')
-    .replaceAll('{{country}}', lead.country || '')
-    .replaceAll('{{city}}', lead.city || '');
+function logInstantlyPush({ leads, campaignId, subject, body, response }) {
+  const now = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT INTO email_log (lead_id, sent_at, subject, body_preview, status, follow_up_due, instant_campaign_id, instant_lead_id, touch_number)
+    VALUES (?, ?, ?, ?, 'pushed_to_instantly', ?, ?, ?, 1)
+  `);
+  const updateLead = db.prepare("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+  const created = new Map((response?.created_leads || []).map(l => [String(l.email || '').toLowerCase(), l.id]));
+  const followUpDue = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString();
+  const tx = db.transaction(() => {
+    for (const lead of leads) {
+      const info = insert.run(
+        lead.id,
+        now,
+        subject || `Instantly campaign ${campaignId}`,
+        String(body || lead.personalized_hook || '').slice(0, 500),
+        followUpDue,
+        campaignId,
+        created.get(String(lead.contact_email || '').toLowerCase()) || null
+      );
+      db.prepare("INSERT INTO followups (email_log_id, due_date, status, message_preview, touch_number) VALUES (?, ?, 'pending', ?, 2)")
+        .run(info.lastInsertRowid, followUpDue, 'Day-4 check: review Instantly reply status before any second touch.');
+      updateLead.run(lead.id);
+    }
+  });
+  tx();
 }
 
 router.get('/', (req, res) => {
@@ -45,115 +54,106 @@ router.get('/', (req, res) => {
 });
 
 router.get('/followups', (req, res) => {
-  const now = new Date().toISOString();
   const rows = db.prepare(`
-    SELECT f.*, e.subject, e.lead_id, l.institution_name, l.contact_name, l.contact_email
+    SELECT f.*, e.subject, e.lead_id, e.touch_number as original_touch, l.institution_name, l.contact_name, l.contact_email, l.send_via
     FROM followups f
     JOIN email_log e ON e.id = f.email_log_id
     LEFT JOIN leads l ON l.id = e.lead_id
-    WHERE f.status = 'pending' AND f.due_date <= ?
+    WHERE f.status = 'pending'
+      AND f.due_date <= ?
+      AND COALESCE(f.touch_number, 2) <= 2
     ORDER BY f.due_date ASC
-  `).all(new Date(Date.now() + 24*60*60*1000).toISOString());
+  `).all(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
   res.json(rows);
 });
 
-router.post('/send', sendLimiter, async (req, res) => {
-  const { lead_id, subject, body, campaign_id, dry_run } = req.body;
-  if (!lead_id || !subject || !body) return res.status(400).json({ error: 'lead_id, subject, body required' });
-  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead_id);
-  if (!lead) return res.status(404).json({ error: 'Lead not found' });
-  if (!lead.contact_email) return res.status(400).json({ error: 'Lead has no contact_email' });
-
-  const finalSubject = substituteVars(subject, lead);
-  const finalBody = substituteVars(body, lead);
-
-  if (dry_run) {
-    return res.json({ dry_run: true, to: lead.contact_email, subject: finalSubject, body: finalBody });
+router.get('/instantly/status', async (req, res, next) => {
+  if (!instantlyConfigured()) {
+    return res.json({ ok: false, configured: false, sender: INSTANTLY_SENDER, error: 'INSTANTLY_API_KEY not set' });
   }
-
-  const transporter = getTransporter();
-  if (!transporter) {
-    return res.status(400).json({ error: 'Gmail not configured. Add GMAIL_APP_PASSWORD to .env in Settings.' });
-  }
-
   try {
-    const info = await transporter.sendMail({
-      from: `"Jason Zachariah" <${process.env.GMAIL_USER}>`,
-      to: lead.contact_email,
-      subject: finalSubject,
-      text: finalBody,
-    });
-    const sentAt = new Date().toISOString();
-    const followUpDue = new Date(Date.now() + 4*24*60*60*1000).toISOString();
-    const ins = db.prepare(`
-      INSERT INTO email_log (lead_id, campaign_id, sent_at, subject, body_preview, status, follow_up_due)
-      VALUES (?, ?, ?, ?, ?, 'sent', ?)
-    `).run(lead_id, campaign_id || null, sentAt, finalSubject, finalBody.slice(0, 500), followUpDue);
-    db.prepare("INSERT INTO followups (email_log_id, due_date, status, message_preview) VALUES (?, ?, 'pending', ?)")
-      .run(ins.lastInsertRowid, followUpDue, finalSubject);
-    db.prepare("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(lead_id);
-    res.json({ success: true, message_id: info.messageId, log_id: ins.lastInsertRowid });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    const [accounts, analytics, campaigns] = await Promise.all([
+      instantlyRequest('/accounts', { query: { search: INSTANTLY_SENDER, limit: 10 } }),
+      instantlyRequest('/accounts/warmup-analytics', { method: 'POST', body: { emails: [INSTANTLY_SENDER] } }),
+      instantlyRequest('/campaigns/analytics'),
+    ]);
+    const sender = (accounts.items || []).find(a => String(a.email).toLowerCase() === INSTANTLY_SENDER.toLowerCase()) || accounts.items?.[0] || null;
+    res.json({ ok: true, configured: true, sender: INSTANTLY_SENDER, account: sender, warmup: analytics, campaigns });
+  } catch (e) { next(e); }
 });
 
-router.post('/send-bulk', sendLimiter, async (req, res) => {
-  const { lead_ids, subject, body, campaign_id, dry_run } = req.body;
-  if (!Array.isArray(lead_ids) || lead_ids.length === 0) return res.status(400).json({ error: 'lead_ids array required' });
-  if (!subject || !body) return res.status(400).json({ error: 'subject and body required' });
+router.get('/instantly/campaigns', async (req, res, next) => {
+  try {
+    const campaigns = await instantlyRequest('/campaigns', { query: { limit: 100, search: req.query.search } });
+    res.json(campaigns);
+  } catch (e) { next(e); }
+});
 
-  const leads = db.prepare(`SELECT * FROM leads WHERE id IN (${lead_ids.map(() => '?').join(',')})`).all(...lead_ids);
-  const eligible = leads.filter(l => l.contact_email && l.send_via !== 'DO_NOT_USE_INSTANTLY');
-  const skipped = leads.length - eligible.length;
-
-  if (dry_run) {
-    return res.json({
-      dry_run: true,
-      total: lead_ids.length,
-      eligible: eligible.length,
-      skipped,
-      previews: eligible.slice(0, 5).map(l => ({
-        to: l.contact_email,
-        subject: substituteVars(subject, l),
-        body_preview: substituteVars(body, l).slice(0, 200),
-      })),
+router.post('/instantly/campaigns', async (req, res, next) => {
+  const { name, send_window_start = '09:00', send_window_end = '17:00', timezone = 'Asia/Kolkata' } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name required' });
+  try {
+    const campaign = await instantlyRequest('/campaigns', {
+      method: 'POST',
+      body: {
+        name,
+        email_list: [INSTANTLY_SENDER],
+        daily_limit: 20,
+        daily_max_leads: 20,
+        stop_on_reply: true,
+        open_tracking: true,
+        link_tracking: false,
+        campaign_schedule: {
+          schedules: [{
+            name: 'NSM workshop weekday window',
+            timing: { from: send_window_start, to: send_window_end },
+            days: { 0: true, 1: true, 2: true, 3: true, 4: true, 5: false, 6: false },
+            timezone,
+          }],
+        },
+      },
     });
-  }
+    res.json(campaign);
+  } catch (e) { next(e); }
+});
 
-  const transporter = getTransporter();
-  if (!transporter) return res.status(400).json({ error: 'Gmail not configured.' });
+router.post('/instantly/push', async (req, res, next) => {
+  const { campaign_id, lead_ids, cluster, archetype, subject, body, dry_run } = req.body || {};
+  if (!campaign_id) return res.status(400).json({ error: 'campaign_id required' });
+  const leads = getEligibleLeads({ lead_ids, cluster, archetype });
+  const skipped = Array.isArray(lead_ids) ? lead_ids.length - leads.length : 0;
+  const payload = {
+    campaign_id,
+    skip_if_in_workspace: true,
+    leads: leads.map(leadToInstantly),
+  };
+  if (dry_run) return res.json({ dry_run: true, total: leads.length, skipped, campaign_id, sample: payload.leads.slice(0, 5) });
+  try {
+    const response = await instantlyRequest('/leads/add', { method: 'POST', body: payload });
+    logInstantlyPush({ leads, campaignId: campaign_id, subject, body, response });
+    res.json({ success: true, pushed: leads.length, skipped, response });
+  } catch (e) { next(e); }
+});
 
-  let sent = 0, failed = 0;
-  for (const l of eligible) {
-    try {
-      const finalSubject = substituteVars(subject, l);
-      const finalBody = substituteVars(body, l);
-      const info = await transporter.sendMail({
-        from: `"Jason Zachariah" <${process.env.GMAIL_USER}>`,
-        to: l.contact_email, subject: finalSubject, text: finalBody,
-      });
-      const sentAt = new Date().toISOString();
-      const followUpDue = new Date(Date.now() + 4*24*60*60*1000).toISOString();
-      const ins = db.prepare(`
-        INSERT INTO email_log (lead_id, campaign_id, sent_at, subject, body_preview, status, follow_up_due)
-        VALUES (?, ?, ?, ?, ?, 'sent', ?)
-      `).run(l.id, campaign_id || null, sentAt, finalSubject, finalBody.slice(0, 500), followUpDue);
-      db.prepare("INSERT INTO followups (email_log_id, due_date, status, message_preview) VALUES (?, ?, 'pending', ?)")
-        .run(ins.lastInsertRowid, followUpDue, finalSubject);
-      db.prepare("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(l.id);
-      sent++;
-      await new Promise(r => setTimeout(r, 3000));
-    } catch (e) {
-      failed++;
-    }
+router.get('/instantly/campaigns/:id/sending-status', async (req, res, next) => {
+  try {
+    res.json(await instantlyRequest(`/campaigns/${req.params.id}/sending-status`, { query: { with_ai_summary: true } }));
+  } catch (e) { next(e); }
+});
+
+router.post('/test-connection', async (req, res) => {
+  if (!instantlyConfigured()) return res.json({ ok: false, error: 'INSTANTLY_API_KEY not set' });
+  try {
+    const accounts = await instantlyRequest('/accounts', { query: { search: INSTANTLY_SENDER, limit: 10 } });
+    res.json({ ok: true, sender: INSTANTLY_SENDER, accounts: accounts.items || [] });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, details: e.payload });
   }
-  res.json({ success: true, sent, failed, skipped });
 });
 
 router.put('/:id/status', (req, res) => {
   const { status } = req.body;
-  const allowed = ['pending', 'sent', 'opened', 'replied', 'bounced'];
+  const allowed = ['pending', 'pushed_to_instantly', 'sent', 'opened', 'replied', 'bounced'];
   if (!allowed.includes(status)) return res.status(400).json({ error: 'invalid status' });
   const ts = new Date().toISOString();
   const updates = ['status = ?'];
@@ -167,17 +167,6 @@ router.put('/:id/status', (req, res) => {
     if (log) db.prepare("UPDATE leads SET status = 'replied' WHERE id = ?").run(log.lead_id);
   }
   res.json({ ok: true });
-});
-
-router.post('/test-connection', async (req, res) => {
-  const t = getTransporter();
-  if (!t) return res.json({ ok: false, error: 'GMAIL_APP_PASSWORD not set' });
-  try {
-    await t.verify();
-    res.json({ ok: true });
-  } catch (e) {
-    res.json({ ok: false, error: e.message });
-  }
 });
 
 export default router;

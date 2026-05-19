@@ -21,6 +21,8 @@ export default function EmailStudio() {
   const [checks, setChecks] = useState({ hook: false, subject: false, attach: true, brochure: true, from: true });
   const [sending, setSending] = useState(false);
   const [sentLog, setSentLog] = useState(null);
+  const [campaignId, setCampaignId] = useState('');
+  const [instantStatus, setInstantStatus] = useState(null);
 
   // bulk state
   const [bulkCluster, setBulkCluster] = useState('');
@@ -38,6 +40,10 @@ export default function EmailStudio() {
     const leadId = params.get('lead');
     if (leadId) api.leads.get(leadId).then(setSelectedLead).catch(() => {});
   }, [params]);
+
+  useEffect(() => {
+    api.emails.instantStatus().then(setInstantStatus).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (leadSearch.length < 2) { setLeadResults([]); return; }
@@ -58,31 +64,36 @@ export default function EmailStudio() {
   const subjectChars = useMemo(() => (selectedLead ? substituteVars(subject, selectedLead) : subject).length, [subject, selectedLead]);
   const wordCount = useMemo(() => body.trim().split(/\s+/).filter(Boolean).length, [body]);
 
-  const send = async () => {
+  const pushSingle = async () => {
     if (!selectedLead) return alert('Select a lead first');
-    if (!Object.values(checks).every(Boolean)) return alert('Complete the pre-send checklist');
+    if (!campaignId.trim()) return alert('Paste the Instantly campaign ID first');
+    if (selectedLead.send_via !== 'INSTANTLY_OK') return alert('This lead is marked hand-write only');
+    if (!selectedLead.contact_email) return alert('This lead has no email');
+    if (!Object.values(checks).every(Boolean)) return alert('Complete the Instantly checklist');
     setSending(true);
     try {
-      const r = await api.emails.send({ lead_id: selectedLead.id, subject, body });
+      const r = await api.emails.pushToInstantly({ campaign_id: campaignId.trim(), lead_ids: [selectedLead.id], subject, body });
       setSentLog(r);
       const refreshed = await api.leads.get(selectedLead.id);
       setSelectedLead(refreshed);
-    } catch (e) { alert('Send failed: ' + e.message); }
+    } catch (e) { alert('Instantly push failed: ' + e.message); }
     setSending(false);
   };
 
   const bulkDryRun = async () => {
     if (bulkLeads.length === 0) return;
-    const r = await api.emails.sendBulk({ lead_ids: bulkLeads.map(l => l.id), subject, body, dry_run: true });
+    if (!campaignId.trim()) return alert('Paste the Instantly campaign ID first');
+    const r = await api.emails.pushToInstantly({ campaign_id: campaignId.trim(), lead_ids: bulkLeads.map(l => l.id), subject, body, dry_run: true });
     setBulkPreview(r);
   };
-  const bulkSend = async () => {
-    if (!confirm(`Send to ${bulkLeads.length} leads at ~20/hr?`)) return;
+  const bulkPush = async () => {
+    if (!campaignId.trim()) return alert('Paste the Instantly campaign ID first');
+    if (!confirm(`Push ${bulkLeads.length} Instantly-ready leads to campaign ${campaignId.trim()}?`)) return;
     setSending(true);
     try {
-      const r = await api.emails.sendBulk({ lead_ids: bulkLeads.map(l => l.id), subject, body });
-      alert(`Bulk send done — sent: ${r.sent}, failed: ${r.failed}, skipped: ${r.skipped}`);
-    } catch (e) { alert('Bulk send failed: ' + e.message); }
+      const r = await api.emails.pushToInstantly({ campaign_id: campaignId.trim(), lead_ids: bulkLeads.map(l => l.id), subject, body });
+      alert(`Instantly push done — pushed: ${r.pushed}, skipped: ${r.skipped}`);
+    } catch (e) { alert('Instantly push failed: ' + e.message); }
     setSending(false);
   };
 
@@ -93,12 +104,22 @@ export default function EmailStudio() {
           <div>
             <div className="eyebrow eyebrow-gold">Section 03</div>
             <h1 className="font-display text-4xl text-paper mt-1">Email Studio</h1>
-            <div className="text-[11px] text-muted italic mt-1">Six archetype templates · variable substitution · 20-per-hour rate limit on bulk send</div>
+            <div className="text-[11px] text-muted italic mt-1">Six archetype templates · variable substitution · Instantly is the send rail</div>
+          </div>
+          <div className="text-right text-[11px] text-muted">
+            <div className="eyebrow">Sender</div>
+            <div className={instantStatus?.configured ? 'text-sage' : 'text-gold'}>
+              {instantStatus?.sender || 'workshops@jasonzacmusic.com'}
+            </div>
           </div>
         </div>
+        <div className="mb-4 max-w-xl">
+          <label className="eyebrow block mb-1.5">Instantly campaign ID</label>
+          <input value={campaignId} onChange={e => setCampaignId(e.target.value)} className="input" placeholder="Paste campaign ID from Instantly" />
+        </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => setTab('single')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'single' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Single send</button>
-          <button onClick={() => setTab('bulk')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'bulk' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Bulk send</button>
+          <button onClick={() => setTab('single')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'single' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Single push</button>
+          <button onClick={() => setTab('bulk')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'bulk' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Bulk push</button>
         </div>
       </div>
 
@@ -178,20 +199,20 @@ export default function EmailStudio() {
                 {selectedLead.send_via === 'DO_NOT_USE_INSTANTLY' && (
                   <div className="bg-accent/20 border border-accent rounded p-2 mt-2 text-[11px] flex items-start gap-2">
                     <AlertTriangle size={12} className="text-accent shrink-0 mt-0.5" />
-                    <span>This is hand-write only. Send carefully, one at a time.</span>
+                    <span>This is hand-write only. It will never be pushed to Instantly.</span>
                   </div>
                 )}
               </div>
             )}
 
             <div>
-              <h3 className="text-xs uppercase tracking-wider text-slate-400 mb-2">Pre-send checklist</h3>
+              <h3 className="text-xs uppercase tracking-wider text-slate-400 mb-2">Instantly checklist</h3>
               {[
                 { k: 'hook', label: 'Personalised hook is specific' },
                 { k: 'subject', label: 'Subject under 60 chars' },
                 { k: 'attach', label: 'No attachments' },
                 { k: 'brochure', label: 'Brochure link present' },
-                { k: 'from', label: 'Sending from correct address' },
+                { k: 'from', label: 'Sender is workshops@jasonzacmusic.com' },
               ].map(({ k, label }) => (
                 <label key={k} className="flex items-center gap-2 text-xs text-slate-300 py-1 cursor-pointer">
                   <input type="checkbox" checked={checks[k]} onChange={e => setChecks({ ...checks, [k]: e.target.checked })} />
@@ -200,16 +221,16 @@ export default function EmailStudio() {
               ))}
             </div>
 
-            <button onClick={send} disabled={!selectedLead || sending} className="w-full bg-accent hover:bg-accent/80 disabled:opacity-40 text-white py-2 rounded flex items-center justify-center gap-2 text-sm font-medium">
-              <Send size={14} /> {sending ? 'Sending…' : 'Send now'}
+            <button onClick={pushSingle} disabled={!selectedLead || sending} className="w-full bg-accent hover:bg-accent/80 disabled:opacity-40 text-white py-2 rounded flex items-center justify-center gap-2 text-sm font-medium">
+              <Send size={14} /> {sending ? 'Pushing…' : 'Push to Instantly'}
             </button>
 
             {sentLog && (
               <div className="bg-success/20 border border-success rounded p-2 text-xs flex items-start gap-2">
                 <Check size={12} className="text-success shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-white">Sent. Follow-up queued for +4 days.</div>
-                  <div className="text-slate-400 text-[10px]">log #{sentLog.log_id}</div>
+                  <div className="text-white">Pushed. Day-4 review surfaced.</div>
+                  <div className="text-slate-400 text-[10px]">{sentLog.pushed ?? sentLog.total ?? 1} lead(s)</div>
                 </div>
               </div>
             )}
@@ -232,11 +253,11 @@ export default function EmailStudio() {
             </div>
             <div className="bg-surface border border-card rounded p-3 text-sm">
               <div className="text-slate-300">{bulkLeads.length} eligible leads (Instantly OK + has email)</div>
-              <div className="text-[11px] text-slate-400 mt-1">Rate limit: 20/hour · ~{Math.ceil(bulkLeads.length / 20)} hr to complete</div>
+              <div className="text-[11px] text-slate-400 mt-1">Sending pace now lives in Instantly campaign settings.</div>
             </div>
             <div className="space-y-2">
               <button onClick={bulkDryRun} disabled={bulkLeads.length === 0} className="w-full py-2 bg-card hover:bg-card/70 rounded text-sm disabled:opacity-40">Dry run preview</button>
-              <button onClick={bulkSend} disabled={bulkLeads.length === 0 || sending} className="w-full py-2 bg-accent hover:bg-accent/80 rounded text-sm text-white font-medium disabled:opacity-40">{sending ? 'Sending…' : `Send to ${bulkLeads.length}`}</button>
+              <button onClick={bulkPush} disabled={bulkLeads.length === 0 || sending} className="w-full py-2 bg-accent hover:bg-accent/80 rounded text-sm text-white font-medium disabled:opacity-40">{sending ? 'Pushing…' : `Push ${bulkLeads.length}`}</button>
             </div>
           </aside>
           <section className="col-span-8 p-4 overflow-y-auto scrollbar-thin">
@@ -245,12 +266,12 @@ export default function EmailStudio() {
             <textarea value={body} onChange={e => setBody(e.target.value)} rows={18} className="w-full bg-card/40 border border-card rounded px-3 py-2 text-sm text-white font-mono" />
             {bulkPreview && (
               <div className="mt-3 bg-surface border border-card rounded p-3 text-xs">
-                <div className="text-white font-semibold mb-1">Dry run: {bulkPreview.eligible} eligible · {bulkPreview.skipped} skipped</div>
-                {bulkPreview.previews?.map((p, i) => (
+                <div className="text-white font-semibold mb-1">Dry run: {bulkPreview.total} eligible · {bulkPreview.skipped} skipped</div>
+                {bulkPreview.sample?.map((p, i) => (
                   <div key={i} className="mt-2 pt-2 border-t border-card">
-                    <div className="text-slate-300">{p.to}</div>
-                    <div className="text-white font-medium">{p.subject}</div>
-                    <div className="text-slate-400 text-[11px]">{p.body_preview}…</div>
+                    <div className="text-slate-300">{p.email}</div>
+                    <div className="text-white font-medium">{p.company_name}</div>
+                    <div className="text-slate-400 text-[11px]">{p.personalization || p.custom_variables?.recommended_topic}</div>
                   </div>
                 ))}
               </div>

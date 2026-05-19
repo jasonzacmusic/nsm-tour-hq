@@ -38,12 +38,20 @@ export const api = {
       if (!res.ok) throw new Error((await res.json()).error || 'Import failed');
       return res.json();
     },
+    resync: (body = {}) => request('/api/leads/resync', { method: 'POST', body: JSON.stringify(body) }),
   },
   emails: {
     list: () => request('/api/emails'),
     followups: () => request('/api/emails/followups'),
-    send: (body) => request('/api/emails/send', { method: 'POST', body: JSON.stringify(body) }),
-    sendBulk: (body) => request('/api/emails/send-bulk', { method: 'POST', body: JSON.stringify(body) }),
+    instantStatus: () => request('/api/emails/instantly/status'),
+    instantCampaigns: (params = {}) => {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v);
+      return request(`/api/emails/instantly/campaigns${qs.toString() ? '?' + qs.toString() : ''}`);
+    },
+    createInstantCampaign: (body) => request('/api/emails/instantly/campaigns', { method: 'POST', body: JSON.stringify(body) }),
+    pushToInstantly: (body) => request('/api/emails/instantly/push', { method: 'POST', body: JSON.stringify(body) }),
+    campaignSendingStatus: (id) => request(`/api/emails/instantly/campaigns/${id}/sending-status`),
     setStatus: (id, status) => request(`/api/emails/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
     testConnection: () => request('/api/emails/test-connection', { method: 'POST' }),
   },
