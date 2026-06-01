@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Upload, Download, X, Pencil, Trash2, Mail, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { Search, Plus, Upload, Download, X, Pencil, Trash2, Mail, ChevronDown, ChevronUp, Sparkles, Copy, MessageCircle, Instagram, ExternalLink, FileText } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { ARCHETYPES, PRIORITIES, STATUSES, SEND_VIA, LANG_CONFIDENCE, VERIFICATION_LEVELS, ENTITY_TYPES, WORKSHOP_TOPICS } from '../lib/constants.js';
 import { PriorityBadge, StatusBadge, SendViaBadge } from '../components/StatusBadge.jsx';
@@ -257,6 +257,7 @@ function LeadDetail({ lead }) {
         <DetailRow k="Notes" v={full.notes} />
       </div>
       <div>
+        <OutreachActions lead={full} />
         <div className="eyebrow eyebrow-gold mb-2">The Hook</div>
         <p className="font-display italic text-[15px] text-paper leading-relaxed mb-5 pl-3 border-l-2 border-gold/40">
           {full.personalized_hook || <span className="text-muted not-italic">— not yet written —</span>}
@@ -275,6 +276,189 @@ function LeadDetail({ lead }) {
       </div>
     </div>
   );
+}
+
+const DEFAULT_BROCHURE_URL = 'https://www.dropbox.com/scl/fi/fsym5auirf2e9zpdzcsp7/Jason-Zac-Workshop-Brochure.pdf?rlkey=wd6yn0b0slmg87nzht7dh8jc6&st=0930ca6w&dl=0';
+const DEFAULT_WHATSAPP = '+91 98454 65411';
+const DEFAULT_YOUTUBE = 'https://youtube.com/nathanielschool';
+
+function OutreachActions({ lead }) {
+  const [settings, setSettings] = useState({});
+  const [copied, setCopied] = useState(null);
+  const [drafts, setDrafts] = useState(null);
+
+  useEffect(() => { api.settings.get().then(setSettings).catch(() => {}); }, []);
+  useEffect(() => { setDrafts(buildDrafts(lead, settings)); }, [lead, settings]);
+  if (!drafts) return null;
+
+  const copy = async (key, text) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 1300);
+  };
+  const openEmail = () => {
+    if (!lead.contact_email) return;
+    window.location.href = `mailto:${lead.contact_email}?subject=${encodeURIComponent(drafts.emailSubject)}&body=${encodeURIComponent(drafts.emailBody)}`;
+  };
+  const openWhatsapp = () => {
+    const phone = normalizePhoneForWa(lead.whatsapp || lead.phone);
+    if (!phone) return;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(drafts.whatsapp)}`, '_blank');
+  };
+  const openInstagram = () => {
+    const handle = normalizeInstagram(lead.instagram_handle);
+    if (!handle) return;
+    window.open(`https://www.instagram.com/${handle}/`, '_blank');
+  };
+
+  return (
+    <div className="card-flat p-4 mb-5 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="eyebrow eyebrow-gold">Outreach Composer</div>
+          <div className="text-[11px] text-muted mt-1">Entity-aware drafts with brochure link included.</div>
+        </div>
+        <button onClick={() => window.open(drafts.brochureUrl, '_blank')} className="btn-ghost"><FileText size={12} />Brochure</button>
+      </div>
+
+      <DraftBox
+        label="Email"
+        value={`${drafts.emailSubject}\n\n${drafts.emailBody}`}
+        onChange={v => {
+          const [subject, ...body] = v.split('\n');
+          setDrafts({ ...drafts, emailSubject: subject, emailBody: body.join('\n').trimStart() });
+        }}
+        actions={[
+          { label: copied === 'email' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('email', `Subject: ${drafts.emailSubject}\n\n${drafts.emailBody}`) },
+          { label: lead.contact_email ? 'Open Email' : 'No Email', icon: Mail, onClick: openEmail, disabled: !lead.contact_email },
+        ]}
+      />
+
+      <DraftBox
+        label="WhatsApp"
+        value={drafts.whatsapp}
+        onChange={v => setDrafts({ ...drafts, whatsapp: v })}
+        actions={[
+          { label: copied === 'wa' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('wa', drafts.whatsapp) },
+          { label: lead.whatsapp || lead.phone ? 'Open WhatsApp' : 'No Number', icon: MessageCircle, onClick: openWhatsapp, disabled: !(lead.whatsapp || lead.phone) },
+        ]}
+      />
+
+      <DraftBox
+        label="Instagram DM"
+        value={drafts.instagram}
+        onChange={v => setDrafts({ ...drafts, instagram: v })}
+        actions={[
+          { label: copied === 'ig' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('ig', drafts.instagram) },
+          { label: lead.instagram_handle ? 'Open Profile' : 'No Handle', icon: Instagram, onClick: openInstagram, disabled: !lead.instagram_handle },
+        ]}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => copy('brochure', drafts.brochureUrl)} className="btn-ghost"><Copy size={12} />{copied === 'brochure' ? 'Copied' : 'Copy brochure link'}</button>
+        {lead.website && <button onClick={() => window.open(lead.website, '_blank')} className="btn-ghost"><ExternalLink size={12} />Website</button>}
+        {lead.source_url && <button onClick={() => window.open(lead.source_url.split('|')[0]?.trim(), '_blank')} className="btn-ghost"><ExternalLink size={12} />Source</button>}
+      </div>
+    </div>
+  );
+}
+
+function DraftBox({ label, value, onChange, actions }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="eyebrow">{label}</div>
+        <div className="flex gap-1.5">
+          {actions.map(({ label: actionLabel, icon: Icon, onClick, disabled }) => (
+            <button key={actionLabel} onClick={onClick} disabled={disabled} className="btn-ghost !py-1.5 !px-2.5">
+              <Icon size={11} />{actionLabel}
+            </button>
+          ))}
+        </div>
+      </div>
+      <textarea value={value} onChange={e => onChange(e.target.value)} rows={label === 'Email' ? 9 : 5} className="input font-mono text-[11px] leading-relaxed" />
+    </div>
+  );
+}
+
+function buildDrafts(lead, settings) {
+  const brochureUrl = settings.brochure_url || DEFAULT_BROCHURE_URL;
+  const whatsapp = settings.phone_whatsapp || DEFAULT_WHATSAPP;
+  const youtube = settings.youtube_url || DEFAULT_YOUTUBE;
+  const name = lead.contact_name?.split(' ')[0] || 'there';
+  const entity = (lead.entity_type || lead.archetype || '').replace(/_/g, ' ');
+  const place = [lead.city, lead.country].filter(Boolean).join(', ');
+  const angle = lead.recommended_outreach_angle || lead.recommended_topic || 'a practical music workshop';
+  const context = lead.personalized_hook || lead.notes || `I came across ${lead.institution_name}${place ? ` in ${place}` : ''} and thought there may be a good fit.`;
+  const offer = offerForLead(lead);
+  const subject = subjectForLead(lead);
+
+  const emailBody = `Hi ${name},
+
+I'm Jason Zachariah, a multi-instrumentalist and music educator from Bangalore. I run Nathaniel School of Music and share lessons/performances through the Nathaniel YouTube channel.
+
+${context}
+
+I'm planning workshop-tour conversations and thought ${lead.institution_name} could be a strong fit for ${angle}. ${offer}
+
+Dates are flexible. I'm building the route around institutions, venues, artists, and communities where there is genuine interest.
+
+Workshop brochure: ${brochureUrl}
+YouTube: ${youtube}
+WhatsApp: ${whatsapp}
+
+Would this be worth a short conversation?
+
+Warmly,
+Jason Zachariah`;
+
+  const whatsappText = `Hi ${name}, Jason Zachariah here from Nathaniel School of Music, Bangalore.
+
+${context}
+
+I'm exploring ${angle} for ${lead.institution_name}. ${offer}
+
+Brochure: ${brochureUrl}
+YouTube: ${youtube}
+
+Would this be of interest?`;
+
+  const instagramText = `Hi ${name}, Jason Zachariah here from Nathaniel School of Music in Bangalore. I came across ${lead.institution_name} and thought there may be a good fit for ${angle}. ${offer}
+
+Brochure: ${brochureUrl}
+YouTube: ${youtube}
+
+Would love to explore if this is of interest.`;
+
+  return { emailSubject: subject, emailBody, whatsapp: whatsappText, instagram: instagramText, brochureUrl };
+}
+
+function subjectForLead(lead) {
+  const entity = lead.entity_type || lead.archetype || '';
+  if (entity.includes('studio')) return `Workshop / production clinic for ${lead.institution_name}`;
+  if (entity.includes('venue')) return `Performance + workshop possibility`;
+  if (entity.includes('choir') || entity.includes('church')) return `Vocal harmony workshop possibility`;
+  if (entity.includes('artist')) return `Musician-to-musician workshop / collaboration`;
+  return `Workshop possibility for ${lead.institution_name}`;
+}
+
+function offerForLead(lead) {
+  const entity = lead.entity_type || lead.archetype || '';
+  if (entity.includes('recording_studio')) return 'This could be a producer-to-producer clinic, DAW workflow session, or songwriting/arrangement workshop.';
+  if (entity.includes('venue')) return 'This could work as a performance, an improvisation workshop, or a performance-plus-workshop evening.';
+  if (entity.includes('choir') || entity.includes('a_cappella') || entity.includes('church')) return 'My mother is a choir director in Bangalore, so vocal harmony, sight-reading, and arrangement work are close to home for me.';
+  if (entity.includes('artist')) return 'This could be a musician-to-musician session, guest workshop, or a way to connect with the local creative network.';
+  if (entity.includes('university')) return 'This could work as a masterclass, visiting artist session, or short residency for music students.';
+  return 'This could be a half-day workshop, full-day intensive, or short residency depending on what fits your students.';
+}
+
+function normalizePhoneForWa(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits.length >= 8 ? digits : '';
+}
+
+function normalizeInstagram(raw) {
+  return String(raw || '').trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//, '').replace(/\/.*$/, '');
 }
 
 function DetailRow({ k, v }) {
