@@ -8,13 +8,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 
 const LEAD_COLUMNS = [
   'cluster','city','state','country','institution_name','archetype',
-  'contact_name','contact_email','instagram_handle','linkedin_url','whatsapp','phone','website',
-  'recommended_topic','priority','personalized_hook','format_recommendation',
-  'language_confidence','status','notes','send_via','verified'
+  'contact_name','contact_email','instagram_handle','linkedin_url','whatsapp','record_id',
+  'entity_type','subtype','phone','website','recommended_topic','source_url','source_type',
+  'recommended_outreach_angle','repo_cluster','dedupe_key','priority','personalized_hook',
+  'format_recommendation','language_confidence','verification_level','status','notes','send_via','verified'
 ];
 
 router.get('/', (req, res) => {
-  const { cluster, country, archetype, priority, status, send_via, language_confidence, search } = req.query;
+  const { cluster, city, country, archetype, entity_type, priority, status, send_via, language_confidence, verification_level, search } = req.query;
   const where = [];
   const params = [];
   if (cluster) {
@@ -22,20 +23,25 @@ router.get('/', (req, res) => {
     where.push(`cluster IN (${list.map(() => '?').join(',')})`);
     params.push(...list);
   }
+  if (city)      { where.push('city = ?');      params.push(city); }
   if (country)   { where.push('country = ?');   params.push(country); }
   if (archetype) { where.push('archetype = ?'); params.push(archetype); }
+  if (entity_type) { where.push('entity_type = ?'); params.push(entity_type); }
   if (priority)  { where.push('priority = ?');  params.push(priority); }
   if (status)    { where.push('status = ?');    params.push(status); }
   if (send_via)  { where.push('send_via = ?');  params.push(send_via); }
   if (language_confidence) { where.push('language_confidence = ?'); params.push(language_confidence); }
+  if (verification_level) { where.push('verification_level = ?'); params.push(verification_level); }
   if (search) {
     where.push(`(
       institution_name LIKE ? OR city LIKE ? OR country LIKE ? OR contact_name LIKE ?
       OR contact_email LIKE ? OR linkedin_url LIKE ? OR whatsapp LIKE ? OR website LIKE ? OR recommended_topic LIKE ?
+      OR entity_type LIKE ? OR subtype LIKE ? OR source_url LIKE ? OR source_type LIKE ?
+      OR recommended_outreach_angle LIKE ? OR repo_cluster LIKE ? OR dedupe_key LIKE ?
       OR personalized_hook LIKE ? OR notes LIKE ?
     )`);
     const q = `%${search}%`;
-    params.push(q, q, q, q, q, q, q, q, q, q, q);
+    params.push(q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q, q);
   }
   const sql = `SELECT * FROM leads ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY
     CASE priority WHEN 'Highest' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 WHEN 'Low' THEN 4 ELSE 5 END,

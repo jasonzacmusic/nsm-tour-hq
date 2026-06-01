@@ -48,6 +48,16 @@ curl -X POST http://localhost:3001/api/leads/resync \
 
 If the Instantly outreach folder is absent, re-sync reports that explicitly and leaves existing data untouched.
 
+### Expansion import
+
+Use the June 2026 ecosystem expansion CSV without replacing current leads:
+
+```bash
+npm run import:expansion -- /Users/nphmacmini/Downloads/master_expansion_leads.csv
+```
+
+The importer adds safe schema fields for entity type, subtype, verification, source URL/type, outreach angle, repo cluster, and dedupe key. It dedupes by normalized website + city + country, normalized name + city + country, then `dedupe_key`, and never fills blank email or phone values.
+
 ## Tests
 
 ```bash

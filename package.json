@@ -13,6 +13,7 @@
     "dev:client": "cd client && vite",
     "build": "cd client && vite build",
     "test": "node scripts/smoke-test.mjs",
+    "import:expansion": "node scripts/import-expansion-leads.mjs",
     "start": "node server/index.js",
     "remotion:studio": "cd remotion && npx remotion studio",
     "remotion:render": "cd remotion && npx remotion render"

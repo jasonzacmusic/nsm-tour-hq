@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Upload, Download, X, Pencil, Trash2, Mail, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { api } from '../lib/api.js';
-import { ARCHETYPES, PRIORITIES, STATUSES, SEND_VIA, LANG_CONFIDENCE, WORKSHOP_TOPICS } from '../lib/constants.js';
+import { ARCHETYPES, PRIORITIES, STATUSES, SEND_VIA, LANG_CONFIDENCE, VERIFICATION_LEVELS, ENTITY_TYPES, WORKSHOP_TOPICS } from '../lib/constants.js';
 import { PriorityBadge, StatusBadge, SendViaBadge } from '../components/StatusBadge.jsx';
 
 const EMPTY_FILTERS = {
-  cluster: '', country: '', archetype: '', priority: '', status: '', send_via: '', language_confidence: '', search: '',
+  cluster: '', city: '', country: '', archetype: '', entity_type: '', priority: '', status: '', send_via: '', language_confidence: '', verification_level: '', search: '',
 };
 
 function filtersFromParams(sp) {
@@ -103,9 +103,12 @@ export default function Leads() {
         </div>
         <div className="px-5 space-y-3 pb-6 hairline-t pt-4">
           <FilterSelect label="Cluster" value={filters.cluster} onChange={v => updateFilters({ ...filters, cluster: v })} options={clusters.map(c => ({ value: c.name, label: c.name }))} />
+          <FilterInput label="City" value={filters.city} onChange={v => updateFilters({ ...filters, city: v })} />
           <FilterInput label="Country" value={filters.country} onChange={v => updateFilters({ ...filters, country: v })} />
+          <FilterSelect label="Entity type" value={filters.entity_type} onChange={v => updateFilters({ ...filters, entity_type: v })} options={ENTITY_TYPES} />
           <FilterSelect label="Archetype" value={filters.archetype} onChange={v => updateFilters({ ...filters, archetype: v })} options={ARCHETYPES} />
           <FilterSelect label="Priority" value={filters.priority} onChange={v => updateFilters({ ...filters, priority: v })} options={PRIORITIES.map(p => ({ value: p, label: p }))} />
+          <FilterSelect label="Verification" value={filters.verification_level} onChange={v => updateFilters({ ...filters, verification_level: v })} options={VERIFICATION_LEVELS.map(v => ({ value: v, label: v }))} />
           <FilterSelect label="Status" value={filters.status} onChange={v => updateFilters({ ...filters, status: v })} options={STATUSES} />
           <FilterSelect label="Send via" value={filters.send_via} onChange={v => updateFilters({ ...filters, send_via: v })} options={SEND_VIA} />
           <FilterSelect label="Language conf." value={filters.language_confidence} onChange={v => updateFilters({ ...filters, language_confidence: v })} options={LANG_CONFIDENCE.map(l => ({ value: l, label: l }))} />
@@ -168,7 +171,7 @@ export default function Leads() {
                       <div className="text-muted truncate max-w-[200px]">{l.contact_email || '—'}</div>
                     </td>
                     <td className="px-3 py-3 text-[11px] text-paper-dim">{l.cluster}</td>
-                    <td className="px-3 py-3 text-[11px] text-muted italic">{l.archetype.replace(/_/g, ' ')}</td>
+                    <td className="px-3 py-3 text-[11px] text-muted italic">{(l.entity_type || l.archetype).replace(/_/g, ' ')}</td>
                     <td className="px-3 py-3"><PriorityBadge value={l.priority} /></td>
                     <td className="px-3 py-3"><StatusBadge value={l.status} /></td>
                     <td className="px-3 py-3"><SendViaBadge value={l.send_via} /></td>
@@ -238,12 +241,19 @@ function LeadDetail({ lead }) {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-[12px]">
       <div className="space-y-1.5">
         <DetailRow k="Recommended topic" v={full.recommended_topic} />
+        <DetailRow k="Entity type" v={full.entity_type} />
+        <DetailRow k="Subtype" v={full.subtype} />
+        <DetailRow k="Verification" v={full.verification_level} />
         <DetailRow k="Format" v={full.format_recommendation} />
         <DetailRow k="Website" v={full.website && <a href={full.website} target="_blank" rel="noreferrer" className="text-gold hover:text-gold-hi underline decoration-dotted">{full.website}</a>} />
         <DetailRow k="Instagram" v={full.instagram_handle} />
         <DetailRow k="LinkedIn" v={full.linkedin_url && <a href={full.linkedin_url} target="_blank" rel="noreferrer" className="text-gold hover:text-gold-hi underline decoration-dotted">{full.linkedin_url}</a>} />
         <DetailRow k="WhatsApp" v={full.whatsapp} />
         <DetailRow k="Phone" v={full.phone} />
+        <DetailRow k="Source" v={full.source_url && <a href={full.source_url.split('|')[0]?.trim()} target="_blank" rel="noreferrer" className="text-gold hover:text-gold-hi underline decoration-dotted">{full.source_url}</a>} />
+        <DetailRow k="Source type" v={full.source_type} />
+        <DetailRow k="Outreach angle" v={full.recommended_outreach_angle} />
+        <DetailRow k="Dedupe key" v={full.dedupe_key} />
         <DetailRow k="Notes" v={full.notes} />
       </div>
       <div>
@@ -281,11 +291,14 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
     cluster: lead.cluster || (clusters[0]?.name || 'Northeast'),
     city: lead.city || '', state: lead.state || '', country: lead.country || 'India',
     institution_name: lead.institution_name || '', archetype: lead.archetype || 'contemporary_academy',
+    entity_type: lead.entity_type || '', subtype: lead.subtype || '',
     contact_name: lead.contact_name || '', contact_email: lead.contact_email || '',
     instagram_handle: lead.instagram_handle || '', linkedin_url: lead.linkedin_url || '', whatsapp: lead.whatsapp || '', phone: lead.phone || '', website: lead.website || '',
     recommended_topic: lead.recommended_topic || '', priority: lead.priority || 'Medium',
     personalized_hook: lead.personalized_hook || '', format_recommendation: lead.format_recommendation || '',
-    language_confidence: lead.language_confidence || 'high', status: lead.status || 'not_contacted',
+    language_confidence: lead.language_confidence || 'high', verification_level: lead.verification_level || '', status: lead.status || 'not_contacted',
+    source_url: lead.source_url || '', source_type: lead.source_type || '',
+    recommended_outreach_angle: lead.recommended_outreach_angle || '', repo_cluster: lead.repo_cluster || '', dedupe_key: lead.dedupe_key || '',
     notes: lead.notes || '', send_via: lead.send_via || 'INSTANTLY_OK',
   });
   const [genLoading, setGenLoading] = useState(false);
@@ -342,6 +355,13 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
                 {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </Field>
+            <Field label="Entity type">
+              <select value={form.entity_type} onChange={e => setForm({ ...form, entity_type: e.target.value })} className="input">
+                <option value="">—</option>
+                {ENTITY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Subtype"><input value={form.subtype} onChange={e => setForm({ ...form, subtype: e.target.value })} className="input" /></Field>
             <Field label="Send via">
               <select value={form.send_via} onChange={e => setForm({ ...form, send_via: e.target.value })} className="input">
                 {SEND_VIA.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -350,6 +370,12 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
             <Field label="Language confidence">
               <select value={form.language_confidence} onChange={e => setForm({ ...form, language_confidence: e.target.value })} className="input">
                 {LANG_CONFIDENCE.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </Field>
+            <Field label="Verification">
+              <select value={form.verification_level} onChange={e => setForm({ ...form, verification_level: e.target.value })} className="input">
+                <option value="">—</option>
+                {VERIFICATION_LEVELS.map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </Field>
           </div>
@@ -362,6 +388,11 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
             <Field label="Phone"><input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input" /></Field>
           </div>
           <Field label="Website"><input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} className="input" /></Field>
+          <Field label="Source URL"><input value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} className="input" /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Source type"><input value={form.source_type} onChange={e => setForm({ ...form, source_type: e.target.value })} className="input" /></Field>
+            <Field label="Dedupe key"><input value={form.dedupe_key} onChange={e => setForm({ ...form, dedupe_key: e.target.value })} className="input" /></Field>
+          </div>
           <Field label="Recommended topic">
             <select value={form.recommended_topic} onChange={e => setForm({ ...form, recommended_topic: e.target.value })} className="input">
               <option value="">—</option>
@@ -369,6 +400,7 @@ function LeadFormDrawer({ lead, clusters, onClose, onSaved }) {
             </select>
           </Field>
           <Field label="Format recommendation"><input value={form.format_recommendation} onChange={e => setForm({ ...form, format_recommendation: e.target.value })} className="input" placeholder="e.g. Week-long residency / Half-day intensive" /></Field>
+          <Field label="Recommended outreach angle"><input value={form.recommended_outreach_angle} onChange={e => setForm({ ...form, recommended_outreach_angle: e.target.value })} className="input" /></Field>
           <Field label={`Personalized hook (${form.personalized_hook.length} chars)`}>
             <textarea value={form.personalized_hook} onChange={e => setForm({ ...form, personalized_hook: e.target.value })} rows={4} className="input" />
             <button onClick={generateHook} disabled={genLoading} className="mt-1.5 text-xs flex items-center gap-1 text-highlight hover:underline disabled:opacity-50">

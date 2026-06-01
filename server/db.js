@@ -32,13 +32,22 @@ export function migrate() {
       instagram_handle TEXT,
       linkedin_url TEXT,
       whatsapp TEXT,
+      record_id TEXT,
+      entity_type TEXT,
+      subtype TEXT,
       phone TEXT,
       website TEXT,
       recommended_topic TEXT,
+      source_url TEXT,
+      source_type TEXT,
+      recommended_outreach_angle TEXT,
+      repo_cluster TEXT,
+      dedupe_key TEXT,
       priority TEXT DEFAULT 'Medium',
       personalized_hook TEXT,
       format_recommendation TEXT,
       language_confidence TEXT DEFAULT 'high',
+      verification_level TEXT,
       status TEXT DEFAULT 'not_contacted',
       notes TEXT,
       send_via TEXT DEFAULT 'INSTANTLY_OK',
@@ -105,10 +114,26 @@ export function migrate() {
   `);
   ensureColumn('leads', 'linkedin_url', 'TEXT');
   ensureColumn('leads', 'whatsapp', 'TEXT');
+  ensureColumn('leads', 'record_id', 'TEXT');
+  ensureColumn('leads', 'entity_type', 'TEXT');
+  ensureColumn('leads', 'subtype', 'TEXT');
+  ensureColumn('leads', 'source_url', 'TEXT');
+  ensureColumn('leads', 'source_type', 'TEXT');
+  ensureColumn('leads', 'recommended_outreach_angle', 'TEXT');
+  ensureColumn('leads', 'repo_cluster', 'TEXT');
+  ensureColumn('leads', 'dedupe_key', 'TEXT');
+  ensureColumn('leads', 'verification_level', 'TEXT');
   ensureColumn('email_log', 'touch_number', 'INTEGER DEFAULT 1');
   ensureColumn('email_log', 'instant_campaign_id', 'TEXT');
   ensureColumn('email_log', 'instant_lead_id', 'TEXT');
   ensureColumn('followups', 'touch_number', 'INTEGER DEFAULT 2');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_leads_city ON leads(city);
+    CREATE INDEX IF NOT EXISTS idx_leads_country ON leads(country);
+    CREATE INDEX IF NOT EXISTS idx_leads_entity_type ON leads(entity_type);
+    CREATE INDEX IF NOT EXISTS idx_leads_verification_level ON leads(verification_level);
+    CREATE INDEX IF NOT EXISTS idx_leads_dedupe_key ON leads(dedupe_key);
+  `);
 }
 
 function ensureColumn(table, column, definition) {
@@ -205,6 +230,15 @@ export function normalizePriority(raw) {
   return raw;
 }
 
+export function normalizeVerification(raw) {
+  if (!raw) return null;
+  const v = String(raw).trim().toLowerCase();
+  if (v === 'highest' || v === 'high') return 'High';
+  if (v === 'medium' || v === 'med') return 'Medium';
+  if (v === 'low') return 'Low';
+  return raw;
+}
+
 export function normalizeArchetype(raw) {
   if (!raw) return 'contemporary_academy';
   const a = String(raw).trim().toLowerCase();
@@ -277,13 +311,22 @@ export function leadFromCsvRow(row, defaults = {}) {
     instagram_handle: row.instagram_handle || row.instagram || null,
     linkedin_url: pickLinkedin(row),
     whatsapp: pickWhatsapp(row),
+    record_id: row.record_id || null,
+    entity_type: row.entity_type || null,
+    subtype: row.subtype || null,
     phone: row.phone || null,
     website: row.website || null,
-    recommended_topic: row.recommended_topic || null,
+    recommended_topic: row.recommended_topic || row.recommended_outreach_angle || null,
+    source_url: row.source_url || null,
+    source_type: row.source_type || null,
+    recommended_outreach_angle: row.recommended_outreach_angle || null,
+    repo_cluster: row.repo_cluster || null,
+    dedupe_key: row.dedupe_key || null,
     priority: normalizePriority(row.priority),
     personalized_hook: row.personalized_hook || null,
     format_recommendation: row.format_recommendation || null,
     language_confidence: pickLanguageConfidence(row),
+    verification_level: normalizeVerification(row.verification_level) || normalizeVerification(row.verified) || null,
     notes: row.notes || null,
     send_via: normalizeSendVia(row.archetype, row.send_via),
     verified: row.verified || null,
@@ -293,8 +336,10 @@ export function leadFromCsvRow(row, defaults = {}) {
 const LEAD_COLUMNS = [
   'cluster', 'city', 'state', 'country', 'institution_name', 'archetype',
   'contact_name', 'contact_email', 'instagram_handle', 'linkedin_url', 'whatsapp',
-  'phone', 'website', 'recommended_topic', 'priority', 'personalized_hook',
-  'format_recommendation', 'language_confidence', 'notes', 'send_via', 'verified',
+  'record_id', 'entity_type', 'subtype', 'phone', 'website', 'recommended_topic',
+  'source_url', 'source_type', 'recommended_outreach_angle', 'repo_cluster', 'dedupe_key',
+  'priority', 'personalized_hook', 'format_recommendation', 'language_confidence',
+  'verification_level', 'notes', 'send_via', 'verified',
 ];
 
 const insertLeadStmt = () => db.prepare(`
@@ -306,8 +351,10 @@ const updateLeadStmt = () => db.prepare(`
   UPDATE leads SET
     cluster = ?, city = ?, state = ?, country = ?, institution_name = ?, archetype = ?,
     contact_name = ?, contact_email = ?, instagram_handle = ?, linkedin_url = ?, whatsapp = ?,
-    phone = ?, website = ?, recommended_topic = ?, priority = ?, personalized_hook = ?,
-    format_recommendation = ?, language_confidence = ?, notes = ?, send_via = ?, verified = ?,
+    record_id = ?, entity_type = ?, subtype = ?, phone = ?, website = ?, recommended_topic = ?,
+    source_url = ?, source_type = ?, recommended_outreach_angle = ?, repo_cluster = ?, dedupe_key = ?,
+    priority = ?, personalized_hook = ?, format_recommendation = ?, language_confidence = ?,
+    verification_level = ?, notes = ?, send_via = ?, verified = ?,
     updated_at = CURRENT_TIMESTAMP
   WHERE id = ?
 `);

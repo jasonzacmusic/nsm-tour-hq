@@ -26,6 +26,20 @@ export const SEND_VIA = [
 
 export const LANG_CONFIDENCE = ['high', 'medium', 'low'];
 
+export const VERIFICATION_LEVELS = ['High', 'Medium', 'Low'];
+
+export const ENTITY_TYPES = [
+  { value: 'music_school', label: 'Music School' },
+  { value: 'music_university', label: 'Music University' },
+  { value: 'university_music_scene', label: 'University Music Scene' },
+  { value: 'venue', label: 'Venue' },
+  { value: 'artist', label: 'Artist' },
+  { value: 'recording_studio', label: 'Recording Studio' },
+  { value: 'choir', label: 'Choir' },
+  { value: 'a_cappella_group', label: 'A Cappella Group' },
+  { value: 'innovative_church', label: 'Innovative Church' },
+];
+
 export const WORKSHOP_TOPICS = [
   'Vocal Harmony',
   'Modern Music Production / DAW',

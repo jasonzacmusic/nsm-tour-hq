@@ -7,7 +7,8 @@ const router = express.Router();
 const INSTANTLY_COLUMNS = [
   'email', 'first_name', 'last_name', 'company_name',
   'personalized_hook', 'city', 'country', 'website',
-  'phone', 'linkedin_url', 'whatsapp', 'archetype', 'recommended_topic', 'priority', 'cluster', 'notes',
+  'phone', 'linkedin_url', 'whatsapp', 'entity_type', 'subtype', 'archetype',
+  'recommended_topic', 'verification_level', 'source_url', 'source_type', 'priority', 'cluster', 'notes',
 ];
 
 router.get('/csv', (req, res) => {
@@ -41,8 +42,13 @@ router.get('/csv', (req, res) => {
       phone: r.phone || r.whatsapp || '',
       linkedin_url: r.linkedin_url || '',
       whatsapp: r.whatsapp || '',
+      entity_type: r.entity_type || '',
+      subtype: r.subtype || '',
       archetype: r.archetype || '',
       recommended_topic: r.recommended_topic || '',
+      verification_level: r.verification_level || '',
+      source_url: r.source_url || '',
+      source_type: r.source_type || '',
       priority: r.priority || '',
       cluster: r.cluster || '',
       notes: r.notes || '',
@@ -65,6 +71,18 @@ router.get('/stats', (req, res) => {
     FROM leads GROUP BY cluster ORDER BY cluster
   `).all();
   const byArchetype = db.prepare('SELECT archetype, COUNT(*) as c FROM leads GROUP BY archetype').all();
+  const byEntityType = db.prepare(`
+    SELECT entity_type, COUNT(*) as c
+    FROM leads
+    WHERE COALESCE(entity_type, '') != ''
+    GROUP BY entity_type ORDER BY entity_type
+  `).all();
+  const byVerification = db.prepare(`
+    SELECT verification_level, COUNT(*) as c
+    FROM leads
+    WHERE COALESCE(verification_level, '') != ''
+    GROUP BY verification_level ORDER BY verification_level
+  `).all();
   const bySendVia = db.prepare('SELECT send_via, COUNT(*) as c FROM leads GROUP BY send_via').all();
   const instantlyReady = db.prepare(`
     SELECT COUNT(*) as c FROM leads
@@ -100,6 +118,8 @@ router.get('/stats', (req, res) => {
     reply_rate: emailsSent ? +(replies / emailsSent * 100).toFixed(1) : 0,
     by_cluster: byCluster,
     by_archetype: byArchetype,
+    by_entity_type: byEntityType,
+    by_verification: byVerification,
     by_send_via: bySendVia,
     instantly_ready: instantlyReady,
     handwrite,
