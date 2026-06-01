@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Upload, Download, X, Pencil, Trash2, Mail, ChevronDown, ChevronUp, Sparkles, Copy, MessageCircle, Instagram, ExternalLink, FileText } from 'lucide-react';
+import { Search, Plus, Upload, Download, X, Pencil, Trash2, Mail, ChevronDown, ChevronUp, Sparkles, Copy, MessageCircle, Instagram, ExternalLink, FileText, Check } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { ARCHETYPES, PRIORITIES, STATUSES, SEND_VIA, LANG_CONFIDENCE, VERIFICATION_LEVELS, ENTITY_TYPES, WORKSHOP_TOPICS } from '../lib/constants.js';
 import { PriorityBadge, StatusBadge, SendViaBadge } from '../components/StatusBadge.jsx';
@@ -262,17 +262,7 @@ function LeadDetail({ lead }) {
         <p className="font-display italic text-[15px] text-paper leading-relaxed mb-5 pl-3 border-l-2 border-gold/40">
           {full.personalized_hook || <span className="text-muted not-italic">— not yet written —</span>}
         </p>
-        <div className="eyebrow mb-2">Email history · {full.emails.length}</div>
-        <ul className="space-y-1.5">
-          {full.emails.map(e => (
-            <li key={e.id} className="flex items-center gap-2 text-paper-dim">
-              <StatusBadge value={e.status} />
-              <span className="truncate flex-1">{e.subject}</span>
-              <span className="text-muted-dim font-mono text-[10px] tabular-nums">{e.sent_at ? new Date(e.sent_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''}</span>
-            </li>
-          ))}
-          {full.emails.length === 0 && <li className="text-muted italic text-[11px]">No emails sent yet.</li>}
-        </ul>
+        <CommunicationHistory communications={full.communications || []} emails={full.emails || []} />
       </div>
     </div>
   );
@@ -286,6 +276,7 @@ function OutreachActions({ lead }) {
   const [settings, setSettings] = useState({});
   const [copied, setCopied] = useState(null);
   const [drafts, setDrafts] = useState(null);
+  const [logged, setLogged] = useState(null);
 
   useEffect(() => { api.settings.get().then(setSettings).catch(() => {}); }, []);
   useEffect(() => { setDrafts(buildDrafts(lead, settings)); }, [lead, settings]);
@@ -310,6 +301,31 @@ function OutreachActions({ lead }) {
     if (!handle) return;
     window.open(`https://www.instagram.com/${handle}/`, '_blank');
   };
+  const logCommunication = async (channel, payload = {}) => {
+    const row = await api.comms.create({
+      lead_id: lead.id,
+      channel,
+      status: 'sent',
+      subject: payload.subject || null,
+      message_preview: payload.message || '',
+      contact_value: payload.contact || '',
+      asset_url: drafts.brochureUrl,
+      notes: payload.notes || '',
+    });
+    setLogged(channel);
+    setTimeout(() => setLogged(null), 1500);
+    return row;
+  };
+  const search = (kind) => {
+    const place = [lead.city, lead.country].filter(Boolean).join(' ');
+    const base = `${lead.institution_name} ${place}`.trim();
+    const q = kind === 'contact'
+      ? `${base} contact email`
+      : kind === 'instagram'
+        ? `site:instagram.com ${base}`
+        : base;
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(q)}`, '_blank');
+  };
 
   return (
     <div className="card-flat p-4 mb-5 space-y-3">
@@ -331,6 +347,7 @@ function OutreachActions({ lead }) {
         actions={[
           { label: copied === 'email' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('email', `Subject: ${drafts.emailSubject}\n\n${drafts.emailBody}`) },
           { label: lead.contact_email ? 'Open Email' : 'No Email', icon: Mail, onClick: openEmail, disabled: !lead.contact_email },
+          { label: logged === 'email' ? 'Logged' : 'Log sent', icon: Check, onClick: () => logCommunication('email', { subject: drafts.emailSubject, message: drafts.emailBody, contact: lead.contact_email }) },
         ]}
       />
 
@@ -341,6 +358,7 @@ function OutreachActions({ lead }) {
         actions={[
           { label: copied === 'wa' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('wa', drafts.whatsapp) },
           { label: lead.whatsapp || lead.phone ? 'Open WhatsApp' : 'No Number', icon: MessageCircle, onClick: openWhatsapp, disabled: !(lead.whatsapp || lead.phone) },
+          { label: logged === 'whatsapp' ? 'Logged' : 'Log sent', icon: Check, onClick: () => logCommunication('whatsapp', { message: drafts.whatsapp, contact: lead.whatsapp || lead.phone }) },
         ]}
       />
 
@@ -351,6 +369,7 @@ function OutreachActions({ lead }) {
         actions={[
           { label: copied === 'ig' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('ig', drafts.instagram) },
           { label: lead.instagram_handle ? 'Open Profile' : 'No Handle', icon: Instagram, onClick: openInstagram, disabled: !lead.instagram_handle },
+          { label: logged === 'instagram' ? 'Logged' : 'Log sent', icon: Check, onClick: () => logCommunication('instagram', { message: drafts.instagram, contact: lead.instagram_handle }) },
         ]}
       />
 
@@ -358,7 +377,50 @@ function OutreachActions({ lead }) {
         <button onClick={() => copy('brochure', drafts.brochureUrl)} className="btn-ghost"><Copy size={12} />{copied === 'brochure' ? 'Copied' : 'Copy brochure link'}</button>
         {lead.website && <button onClick={() => window.open(lead.website, '_blank')} className="btn-ghost"><ExternalLink size={12} />Website</button>}
         {lead.source_url && <button onClick={() => window.open(lead.source_url.split('|')[0]?.trim(), '_blank')} className="btn-ghost"><ExternalLink size={12} />Source</button>}
+        <button onClick={() => search('web')} className="btn-ghost"><Search size={12} />Search web</button>
+        <button onClick={() => search('contact')} className="btn-ghost"><Search size={12} />Find contact</button>
+        <button onClick={() => search('instagram')} className="btn-ghost"><Instagram size={12} />Find IG</button>
+        <button onClick={() => logCommunication('website_form', { message: 'Submitted website/contact form manually.', contact: lead.website, notes: 'Manual website/form outreach' })} className="btn-ghost"><Check size={12} />{logged === 'website_form' ? 'Logged form' : 'Log form'}</button>
       </div>
+    </div>
+  );
+}
+
+function CommunicationHistory({ communications, emails }) {
+  const instantLogs = emails.map(e => ({
+    id: `email-${e.id}`,
+    channel: 'instantly',
+    occurred_at: e.sent_at,
+    status: e.status,
+    subject: e.subject,
+    message_preview: e.body_preview,
+    follow_up_due: e.follow_up_due,
+  }));
+  const rows = [...communications, ...instantLogs]
+    .sort((a, b) => String(b.occurred_at || '').localeCompare(String(a.occurred_at || '')));
+  return (
+    <div>
+      <div className="eyebrow mb-2">Communication history · {rows.length}</div>
+      <ul className="space-y-1.5">
+        {rows.map(c => (
+          <li key={`${c.channel}-${c.id}`} className="text-paper-dim border border-line/60 rounded-sm px-2.5 py-2">
+            <div className="flex items-center gap-2">
+              <span className="eyebrow eyebrow-gold">{String(c.channel).replace(/_/g, ' ')}</span>
+              <StatusBadge value={c.status} />
+              <span className="text-muted-dim font-mono text-[10px] tabular-nums ml-auto">
+                {c.occurred_at ? new Date(c.occurred_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''}
+              </span>
+            </div>
+            {(c.subject || c.message_preview) && (
+              <div className="mt-1 text-[11px] text-muted line-clamp-2">{c.subject || c.message_preview}</div>
+            )}
+            {c.follow_up_due && (
+              <div className="mt-1 text-[10px] text-gold">Follow up: {new Date(c.follow_up_due).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
+            )}
+          </li>
+        ))}
+        {rows.length === 0 && <li className="text-muted italic text-[11px]">No communication logged yet.</li>}
+      </ul>
     </div>
   );
 }

@@ -5,7 +5,6 @@ import Dashboard from './pages/Dashboard.jsx';
 import Leads from './pages/Leads.jsx';
 import EmailStudio from './pages/EmailStudio.jsx';
 import SchoolFinder from './pages/SchoolFinder.jsx';
-import RemotionStudio from './pages/RemotionStudio.jsx';
 import Settings from './pages/Settings.jsx';
 
 export default function App() {
@@ -19,7 +18,7 @@ export default function App() {
           <Route path="/leads" element={<Leads />} />
           <Route path="/email" element={<EmailStudio />} />
           <Route path="/finder" element={<SchoolFinder />} />
-          <Route path="/remotion" element={<RemotionStudio />} />
+          <Route path="/remotion" element={<Navigate to="/email" replace />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

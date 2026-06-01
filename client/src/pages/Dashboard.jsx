@@ -20,7 +20,7 @@ export default function Dashboard() {
         const [s, c, q, f, r, instant] = await Promise.all([
           api.export.stats(), api.clusters(),
           api.leads.list({ priority: 'Highest', status: 'not_contacted' }),
-          api.emails.followups(), api.emails.list(),
+          api.comms.followups({ horizon_days: 1 }), api.emails.list(),
           api.emails.instantStatus().catch(e => ({ ok: false, error: e.message })),
         ]);
         setStats({ ...s, followups_due: f.filter(x => new Date(x.due_date) <= new Date()).length });

@@ -55,6 +55,20 @@ export const api = {
     setStatus: (id, status) => request(`/api/emails/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
     testConnection: () => request('/api/emails/test-connection', { method: 'POST' }),
   },
+  comms: {
+    list: (params = {}) => {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '' && v !== null) qs.set(k, v);
+      return request(`/api/comms${qs.toString() ? '?' + qs.toString() : ''}`);
+    },
+    followups: (params = {}) => {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '' && v !== null) qs.set(k, v);
+      return request(`/api/comms/followups${qs.toString() ? '?' + qs.toString() : ''}`);
+    },
+    create: (body) => request('/api/comms', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/comms/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  },
   campaigns: {
     list: () => request('/api/campaigns'),
     get: (id) => request(`/api/campaigns/${id}`),

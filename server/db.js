@@ -13,7 +13,8 @@ export const DEFAULT_SOURCE_DATA_DIR = path.join(
   'raw'
 );
 
-export const db = new Database(process.env.NSM_TOUR_DB_PATH || path.join(DATA_DIR, 'nsm_tour.db'));
+const DEFAULT_DB_PATH = process.env.VERCEL ? path.join('/tmp', 'nsm_tour.db') : path.join(DATA_DIR, 'nsm_tour.db');
+export const db = new Database(process.env.NSM_TOUR_DB_PATH || DEFAULT_DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -89,6 +90,23 @@ export function migrate() {
       message_preview TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS communication_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+      channel TEXT NOT NULL,
+      direction TEXT DEFAULT 'outbound',
+      occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      status TEXT DEFAULT 'sent',
+      subject TEXT,
+      message_preview TEXT,
+      contact_value TEXT,
+      asset_url TEXT,
+      follow_up_due DATETIME,
+      touch_number INTEGER DEFAULT 1,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS clusters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
@@ -111,6 +129,8 @@ export function migrate() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_institution_city ON leads(institution_name, city);
     CREATE INDEX IF NOT EXISTS idx_email_log_lead ON email_log(lead_id);
     CREATE INDEX IF NOT EXISTS idx_followups_due ON followups(due_date, status);
+    CREATE INDEX IF NOT EXISTS idx_communication_log_lead ON communication_log(lead_id);
+    CREATE INDEX IF NOT EXISTS idx_communication_log_followup ON communication_log(follow_up_due, status);
   `);
   ensureColumn('leads', 'linkedin_url', 'TEXT');
   ensureColumn('leads', 'whatsapp', 'TEXT');
@@ -127,6 +147,8 @@ export function migrate() {
   ensureColumn('email_log', 'instant_campaign_id', 'TEXT');
   ensureColumn('email_log', 'instant_lead_id', 'TEXT');
   ensureColumn('followups', 'touch_number', 'INTEGER DEFAULT 2');
+  ensureColumn('communication_log', 'asset_url', 'TEXT');
+  ensureColumn('communication_log', 'touch_number', 'INTEGER DEFAULT 1');
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_leads_city ON leads(city);
     CREATE INDEX IF NOT EXISTS idx_leads_country ON leads(country);
@@ -177,6 +199,7 @@ const CSV_FILES = [
   { file: 'india_workshop_leads.csv', defaultCluster: null, defaultCountry: 'India' },
   { file: 'vietnam_workshop_leads_v2.csv', defaultCluster: 'Vietnam', defaultCountry: 'Vietnam' },
   { file: 'overseas_research_leads.csv', defaultCluster: null, defaultCountry: null },
+  { file: 'master_expansion_leads.csv', defaultCluster: 'Expansion', defaultCountry: null },
 ];
 
 const CLUSTER_NORMALIZE = {
@@ -246,6 +269,23 @@ export function normalizeArchetype(raw) {
   return a;
 }
 
+function archetypeForEntity(entityType) {
+  const entity = String(entityType || '').trim().toLowerCase();
+  if (entity === 'recording_studio') return 'production_studio';
+  if (entity === 'venue') return 'jazz_venue';
+  if (entity === 'music_university' || entity === 'university_music_scene') return 'conservatory';
+  if (entity === 'choir' || entity === 'a_cappella_group' || entity === 'innovative_church') return 'church_choir';
+  return 'contemporary_academy';
+}
+
+function sendViaForEntity(row) {
+  const verification = normalizeVerification(row.verification_level);
+  const entity = String(row.entity_type || '').trim().toLowerCase();
+  if (verification === 'Low') return 'DO_NOT_USE_INSTANTLY';
+  if (['choir', 'a_cappella_group', 'innovative_church', 'artist'].includes(entity)) return 'DO_NOT_USE_INSTANTLY';
+  return pickEmail(row) ? 'INSTANTLY_OK' : 'DO_NOT_USE_INSTANTLY';
+}
+
 export function normalizeSendVia(rawArchetype, rawSendVia) {
   if (rawSendVia) {
     const s = String(rawSendVia).trim().toUpperCase();
@@ -298,9 +338,9 @@ export function pickLanguageConfidence(row) {
 export function leadFromCsvRow(row, defaults = {}) {
   const institution = pickInstitution(row);
   if (!institution) return null;
-  const archetype = normalizeArchetype(row.archetype);
+  const archetype = row.archetype ? normalizeArchetype(row.archetype) : archetypeForEntity(row.entity_type);
   return {
-    cluster: normalizeCluster(row.cluster, defaults.defaultCluster),
+    cluster: normalizeCluster(row.cluster || row.repo_cluster, defaults.defaultCluster),
     city: row.city || null,
     state: row.state || null,
     country: row.country || defaults.defaultCountry || 'India',
@@ -328,7 +368,7 @@ export function leadFromCsvRow(row, defaults = {}) {
     language_confidence: pickLanguageConfidence(row),
     verification_level: normalizeVerification(row.verification_level) || normalizeVerification(row.verified) || null,
     notes: row.notes || null,
-    send_via: normalizeSendVia(row.archetype, row.send_via),
+    send_via: (row.send_via || row.archetype) ? normalizeSendVia(row.archetype, row.send_via) : sendViaForEntity(row),
     verified: row.verified || null,
   };
 }
@@ -341,6 +381,7 @@ const LEAD_COLUMNS = [
   'priority', 'personalized_hook', 'format_recommendation', 'language_confidence',
   'verification_level', 'notes', 'send_via', 'verified',
 ];
+const UPDATE_LEAD_COLUMNS = LEAD_COLUMNS.filter(c => !['institution_name', 'city'].includes(c));
 
 const insertLeadStmt = () => db.prepare(`
   INSERT INTO leads (${LEAD_COLUMNS.join(', ')})
@@ -349,12 +390,7 @@ const insertLeadStmt = () => db.prepare(`
 
 const updateLeadStmt = () => db.prepare(`
   UPDATE leads SET
-    cluster = ?, city = ?, state = ?, country = ?, institution_name = ?, archetype = ?,
-    contact_name = ?, contact_email = ?, instagram_handle = ?, linkedin_url = ?, whatsapp = ?,
-    record_id = ?, entity_type = ?, subtype = ?, phone = ?, website = ?, recommended_topic = ?,
-    source_url = ?, source_type = ?, recommended_outreach_angle = ?, repo_cluster = ?, dedupe_key = ?,
-    priority = ?, personalized_hook = ?, format_recommendation = ?, language_confidence = ?,
-    verification_level = ?, notes = ?, send_via = ?, verified = ?,
+    ${UPDATE_LEAD_COLUMNS.map(c => `${c} = ?`).join(', ')},
     updated_at = CURRENT_TIMESTAMP
   WHERE id = ?
 `);
@@ -364,9 +400,9 @@ function leadValues(lead) {
 }
 
 function upsertLead(lead, insert, update) {
-  const existing = findLead(lead.institution_name, lead.city);
+  const existing = findImportedLead(lead);
   if (existing) {
-    update.run(...leadValues(lead), existing.id);
+    update.run(...UPDATE_LEAD_COLUMNS.map(c => lead[c]), existing.id);
     return 'updated';
   }
   insert.run(...leadValues(lead));
@@ -410,6 +446,53 @@ export function findLead(institutionName, city) {
     WHERE lower(institution_name) = lower(?)
       AND lower(COALESCE(city, '')) = lower(COALESCE(?, ''))
   `).get(institutionName, city || null);
+}
+
+function findImportedLead(lead) {
+  if (lead.dedupe_key) {
+    const byKey = db.prepare("SELECT id FROM leads WHERE lower(COALESCE(dedupe_key, '')) = lower(?)").get(lead.dedupe_key);
+    if (byKey) return byKey;
+  }
+  const rows = db.prepare('SELECT id, institution_name, city, country, website, dedupe_key FROM leads').all();
+  const incoming = importKeys(lead);
+  return rows.find(row => {
+    const existing = importKeys(row);
+    return (incoming.website && incoming.website === existing.website)
+      || (incoming.name && incoming.name === existing.name)
+      || (incoming.legacyNameCity && incoming.legacyNameCity === existing.legacyNameCity);
+  }) || null;
+}
+
+function importKeys(row) {
+  const city = normalizeImportText(row.city);
+  const country = normalizeImportText(row.country);
+  return {
+    website: row.website && city && country ? `${normalizeImportWebsite(row.website)}|${city}|${country}` : '',
+    name: row.institution_name && city && country ? `${normalizeImportText(row.institution_name)}|${city}|${country}` : '',
+    legacyNameCity: row.institution_name && city ? `${normalizeImportText(row.institution_name)}|${city}` : '',
+  };
+}
+
+function normalizeImportText(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function normalizeImportWebsite(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw.match(/^https?:\/\//i) ? raw : `https://${raw}`);
+    return url.hostname.replace(/^www\./i, '').toLowerCase() + url.pathname.replace(/\/+$/g, '').toLowerCase();
+  } catch {
+    return raw.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/g, '');
+  }
 }
 
 export function resyncLeadsFromDisk(sourceDir = DEFAULT_SOURCE_DATA_DIR) {

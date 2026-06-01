@@ -57,7 +57,11 @@ router.get('/:id', (req, res) => {
     SELECT id, sent_at, subject, body_preview, status, opened_at, replied_at, follow_up_due
     FROM email_log WHERE lead_id = ? ORDER BY COALESCE(sent_at, '0') DESC, id DESC
   `).all(req.params.id);
-  res.json({ ...lead, emails });
+  const communications = db.prepare(`
+    SELECT id, channel, direction, occurred_at, status, subject, message_preview, contact_value, asset_url, follow_up_due, touch_number, notes
+    FROM communication_log WHERE lead_id = ? ORDER BY COALESCE(occurred_at, created_at) DESC, id DESC
+  `).all(req.params.id);
+  res.json({ ...lead, emails, communications });
 });
 
 router.post('/', (req, res) => {

@@ -8,3 +8,4 @@ server/data/nsm_tour.db-shm
 client/dist
 remotion/out
 .DS_Store
+.vercel

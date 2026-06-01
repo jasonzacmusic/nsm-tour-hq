@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Check, AlertTriangle, Search as SearchIcon } from 'lucide-react';
+import { Send, Check, AlertTriangle, Search as SearchIcon, MessageCircle, Instagram, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { EMAIL_TEMPLATES, getTemplate, substituteVars } from '../lib/templates.js';
 import EmailPreview from '../components/EmailPreview.jsx';
@@ -23,6 +23,8 @@ export default function EmailStudio() {
   const [sentLog, setSentLog] = useState(null);
   const [campaignId, setCampaignId] = useState('');
   const [instantStatus, setInstantStatus] = useState(null);
+  const [manualFollowups, setManualFollowups] = useState([]);
+  const [recentComms, setRecentComms] = useState([]);
 
   // bulk state
   const [bulkCluster, setBulkCluster] = useState('');
@@ -43,6 +45,8 @@ export default function EmailStudio() {
 
   useEffect(() => {
     api.emails.instantStatus().then(setInstantStatus).catch(() => {});
+    api.comms.followups({ horizon_days: 7 }).then(setManualFollowups).catch(() => {});
+    api.comms.list().then(r => setRecentComms(r.slice(0, 8))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -103,8 +107,8 @@ export default function EmailStudio() {
         <div className="flex items-end justify-between mb-4">
           <div>
             <div className="eyebrow eyebrow-gold">Section 03</div>
-            <h1 className="font-display text-4xl text-paper mt-1">Email Studio</h1>
-            <div className="text-[11px] text-muted italic mt-1">Six archetype templates · variable substitution · Instantly is the send rail</div>
+            <h1 className="font-display text-4xl text-paper mt-1">Outreach</h1>
+            <div className="text-[11px] text-muted italic mt-1">Instantly for bulk email · manual email/WhatsApp/Instagram for high-value targets · follow-up reminders</div>
           </div>
           <div className="text-right text-[11px] text-muted">
             <div className="eyebrow">Sender</div>
@@ -120,10 +124,16 @@ export default function EmailStudio() {
         <div className="flex items-center gap-1">
           <button onClick={() => setTab('single')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'single' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Single push</button>
           <button onClick={() => setTab('bulk')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'bulk' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Bulk push</button>
+          <button onClick={() => setTab('followups')} className={`px-4 py-2.5 text-[12px] uppercase tracking-widest font-semibold border-b-2 -mb-px transition ${tab === 'followups' ? 'border-rust text-paper' : 'border-transparent text-muted hover:text-paper'}`}>Follow-ups</button>
         </div>
       </div>
 
-      {tab === 'single' ? (
+      {tab === 'followups' ? (
+        <FollowupDesk followups={manualFollowups} recent={recentComms} onRefresh={async () => {
+          setManualFollowups(await api.comms.followups({ horizon_days: 7 }));
+          setRecentComms((await api.comms.list()).slice(0, 8));
+        }} />
+      ) : tab === 'single' ? (
         <div className="flex-1 grid grid-cols-12 min-h-0">
           <aside className="col-span-3 border-r border-card overflow-y-auto scrollbar-thin p-3">
             <h3 className="text-xs uppercase tracking-wider text-slate-400 mb-2">Templates</h3>
@@ -279,6 +289,65 @@ export default function EmailStudio() {
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function FollowupDesk({ followups, recent, onRefresh }) {
+  const mark = async (id, status) => {
+    await api.comms.update(id, { status });
+    await onRefresh();
+  };
+  return (
+    <div className="flex-1 grid grid-cols-12 min-h-0">
+      <section className="col-span-7 border-r border-card overflow-y-auto scrollbar-thin p-6">
+        <div className="flex items-end justify-between mb-4">
+          <div>
+            <div className="eyebrow eyebrow-gold">Manual queue</div>
+            <h2 className="font-display text-2xl text-paper mt-1">Due follow-ups</h2>
+          </div>
+          <button onClick={onRefresh} className="btn-ghost">Refresh</button>
+        </div>
+        <div className="space-y-3">
+          {followups.map(f => (
+            <div key={f.id} className="card-flat p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-display text-lg text-paper">{f.institution_name}</div>
+                  <div className="text-[11px] text-muted mt-1">{f.city}{f.country ? `, ${f.country}` : ''} · {String(f.channel).replace(/_/g, ' ')}</div>
+                </div>
+                <div className="text-[10px] text-gold font-mono">{new Date(f.follow_up_due).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</div>
+              </div>
+              {f.message_preview && <p className="text-[12px] text-paper-dim mt-3 line-clamp-3">{f.message_preview}</p>}
+              <div className="flex flex-wrap gap-2 mt-4">
+                {f.contact_email && <a href={`mailto:${f.contact_email}`} className="btn-ghost"><Send size={12} />Email</a>}
+                {(f.whatsapp || f.phone) && <a href={`https://wa.me/${String(f.whatsapp || f.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-ghost"><MessageCircle size={12} />WhatsApp</a>}
+                {f.instagram_handle && <a href={`https://www.instagram.com/${String(f.instagram_handle).replace(/^@/, '')}/`} target="_blank" rel="noreferrer" className="btn-ghost"><Instagram size={12} />Instagram</a>}
+                <button onClick={() => mark(f.id, 'replied')} className="btn-ghost"><Check size={12} />Replied</button>
+                <button onClick={() => mark(f.id, 'closed')} className="btn-ghost">Close</button>
+              </div>
+            </div>
+          ))}
+          {followups.length === 0 && <div className="text-center text-muted italic py-16">No manual follow-ups due in the next 7 days.</div>}
+        </div>
+      </section>
+      <aside className="col-span-5 overflow-y-auto scrollbar-thin p-6">
+        <div className="eyebrow eyebrow-gold">Recent touchpoints</div>
+        <h2 className="font-display text-2xl text-paper mt-1 mb-4">Communication log</h2>
+        <div className="space-y-2">
+          {recent.map(c => (
+            <div key={c.id} className="border border-line rounded-sm px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="eyebrow">{String(c.channel).replace(/_/g, ' ')}</span>
+                <span className="text-[10px] text-muted ml-auto">{c.occurred_at ? new Date(c.occurred_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''}</span>
+              </div>
+              <div className="text-[13px] text-paper mt-1 truncate">{c.institution_name}</div>
+              <div className="text-[11px] text-muted line-clamp-2">{c.subject || c.message_preview || c.notes}</div>
+            </div>
+          ))}
+          {recent.length === 0 && <div className="text-muted italic text-[12px]">No manual communication logged yet.</div>}
+        </div>
+      </aside>
     </div>
   );
 }

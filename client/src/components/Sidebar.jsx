@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutGrid, List, Mail, Search, Film, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutGrid, List, Mail, Search, Settings as SettingsIcon } from 'lucide-react';
 import { api } from '../lib/api.js';
 
 const links = [
   { to: '/dashboard', icon: LayoutGrid, label: 'Dashboard', num: '01' },
   { to: '/leads', icon: List, label: 'Leads', num: '02' },
-  { to: '/email', icon: Mail, label: 'Email Studio', num: '03' },
+  { to: '/email', icon: Mail, label: 'Outreach', num: '03' },
   { to: '/finder', icon: Search, label: 'School Finder', num: '04' },
-  { to: '/remotion', icon: Film, label: 'Remotion', num: '05' },
-  { to: '/settings', icon: SettingsIcon, label: 'Settings', num: '06' },
+  { to: '/settings', icon: SettingsIcon, label: 'Settings', num: '05' },
 ];
 
 export default function Sidebar() {

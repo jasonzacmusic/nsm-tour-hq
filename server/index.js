@@ -12,6 +12,7 @@ import emailsRouter from './routes/emails.js';
 import campaignsRouter from './routes/campaigns.js';
 import finderRouter from './routes/finder.js';
 import exportRouter from './routes/export.js';
+import commsRouter from './routes/comms.js';
 import { startFollowupScheduler } from './followupScheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,7 @@ app.use('/api/emails', emailsRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/finder', finderRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/comms', commsRouter);
 
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDist)) {
@@ -79,6 +81,10 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.message || 'Server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`[server] NSM Tour HQ API on http://localhost:${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[server] NSM Tour HQ API on http://localhost:${PORT}`);
+  });
+}
+
+export default app;
