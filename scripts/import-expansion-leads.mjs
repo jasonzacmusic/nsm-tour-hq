@@ -76,6 +76,8 @@ function archetypeFor(row) {
 }
 
 function sendViaFor(row) {
+  const mapped = text(row.send_via);
+  if (mapped === 'INSTANTLY_OK' || mapped === 'DO_NOT_USE_INSTANTLY') return mapped;
   const verification = exactVerification(row.verification_level);
   const entity = normalizeText(row.entity_type);
   if (verification === 'Low') return 'DO_NOT_USE_INSTANTLY';
@@ -183,11 +185,7 @@ function mergedLead(existing, incoming) {
   merged.language_confidence = (merged.verification_level || existing.language_confidence || 'Medium').toLowerCase();
   merged.verified = merged.language_confidence;
   merged.notes = mergeText(existing.notes, incoming.notes);
-  if (incoming.send_via === 'INSTANTLY_OK' && existing.send_via !== 'DO_NOT_USE_INSTANTLY') {
-    merged.send_via = 'INSTANTLY_OK';
-  } else {
-    merged.send_via = existing.send_via || incoming.send_via;
-  }
+  merged.send_via = incoming.send_via || existing.send_via;
   return merged;
 }
 
