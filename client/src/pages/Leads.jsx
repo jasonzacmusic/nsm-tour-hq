@@ -271,6 +271,7 @@ function LeadDetail({ lead }) {
 const DEFAULT_BROCHURE_URL = 'https://www.dropbox.com/scl/fi/fsym5auirf2e9zpdzcsp7/Jason-Zac-Workshop-Brochure.pdf?rlkey=wd6yn0b0slmg87nzht7dh8jc6&st=0930ca6w&dl=0';
 const DEFAULT_WHATSAPP = '+91 98454 65411';
 const DEFAULT_YOUTUBE = 'https://youtube.com/nathanielschool';
+const PERSONAL_EMAIL_SENDER = 'workshops@jasonzacmusic.com';
 
 function OutreachActions({ lead }) {
   const [settings, setSettings] = useState({});
@@ -289,7 +290,12 @@ function OutreachActions({ lead }) {
   };
   const openEmail = () => {
     if (!lead.contact_email) return;
-    window.location.href = `mailto:${lead.contact_email}?subject=${encodeURIComponent(drafts.emailSubject)}&body=${encodeURIComponent(drafts.emailBody)}`;
+    window.open(buildGmailComposeUrl({
+      to: lead.contact_email,
+      subject: drafts.emailSubject,
+      body: drafts.emailBody,
+      from: PERSONAL_EMAIL_SENDER,
+    }), '_blank');
   };
   const openWhatsapp = () => {
     const phone = normalizePhoneForWa(lead.whatsapp || lead.phone);
@@ -332,7 +338,7 @@ function OutreachActions({ lead }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="eyebrow eyebrow-gold">Outreach Composer</div>
-          <div className="text-[11px] text-muted mt-1">Entity-aware drafts with brochure link included.</div>
+          <div className="text-[11px] text-muted mt-1">Entity-aware drafts with brochure link included. Email opens from {PERSONAL_EMAIL_SENDER}.</div>
         </div>
         <button onClick={() => window.open(drafts.brochureUrl, '_blank')} className="btn-ghost"><FileText size={12} />Brochure</button>
       </div>
@@ -346,8 +352,8 @@ function OutreachActions({ lead }) {
         }}
         actions={[
           { label: copied === 'email' ? 'Copied' : 'Copy', icon: Copy, onClick: () => copy('email', `Subject: ${drafts.emailSubject}\n\n${drafts.emailBody}`) },
-          { label: lead.contact_email ? 'Open Email' : 'No Email', icon: Mail, onClick: openEmail, disabled: !lead.contact_email },
-          { label: logged === 'email' ? 'Logged' : 'Log sent', icon: Check, onClick: () => logCommunication('email', { subject: drafts.emailSubject, message: drafts.emailBody, contact: lead.contact_email }) },
+          { label: lead.contact_email ? 'Open Gmail' : 'No Email', icon: Mail, onClick: openEmail, disabled: !lead.contact_email },
+          { label: logged === 'email' ? 'Logged' : 'Log sent', icon: Check, onClick: () => logCommunication('email', { subject: drafts.emailSubject, message: drafts.emailBody, contact: lead.contact_email, notes: `Manual Gmail outreach from ${PERSONAL_EMAIL_SENDER}` }) },
         ]}
       />
 
@@ -521,6 +527,17 @@ function normalizePhoneForWa(raw) {
 
 function normalizeInstagram(raw) {
   return String(raw || '').trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//, '').replace(/\/.*$/, '');
+}
+
+function buildGmailComposeUrl({ to, subject, body, from }) {
+  const params = new URLSearchParams({
+    view: 'cm',
+    fs: '1',
+    to,
+    su: subject,
+    body,
+  });
+  return `https://mail.google.com/mail/u/${encodeURIComponent(from)}/?${params.toString()}`;
 }
 
 function DetailRow({ k, v }) {

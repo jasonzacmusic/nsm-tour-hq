@@ -7,6 +7,8 @@ import EmailPreview from '../components/EmailPreview.jsx';
 import { PriorityBadge, SendViaBadge } from '../components/StatusBadge.jsx';
 import { ARCHETYPES } from '../lib/constants.js';
 
+const PERSONAL_EMAIL_SENDER = 'workshops@jasonzacmusic.com';
+
 export default function EmailStudio() {
   const [params] = useSearchParams();
   const [tab, setTab] = useState('single');
@@ -320,7 +322,12 @@ function FollowupDesk({ followups, recent, onRefresh }) {
               </div>
               {f.message_preview && <p className="text-[12px] text-paper-dim mt-3 line-clamp-3">{f.message_preview}</p>}
               <div className="flex flex-wrap gap-2 mt-4">
-                {f.contact_email && <a href={`mailto:${f.contact_email}`} className="btn-ghost"><Send size={12} />Email</a>}
+                {f.contact_email && <a href={buildGmailComposeUrl({
+                  to: f.contact_email,
+                  subject: f.subject || `Following up with ${f.institution_name}`,
+                  body: f.message_preview || '',
+                  from: PERSONAL_EMAIL_SENDER,
+                })} target="_blank" rel="noreferrer" className="btn-ghost"><Send size={12} />Gmail</a>}
                 {(f.whatsapp || f.phone) && <a href={`https://wa.me/${String(f.whatsapp || f.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="btn-ghost"><MessageCircle size={12} />WhatsApp</a>}
                 {f.instagram_handle && <a href={`https://www.instagram.com/${String(f.instagram_handle).replace(/^@/, '')}/`} target="_blank" rel="noreferrer" className="btn-ghost"><Instagram size={12} />Instagram</a>}
                 <button onClick={() => mark(f.id, 'replied')} className="btn-ghost"><Check size={12} />Replied</button>
@@ -350,6 +357,17 @@ function FollowupDesk({ followups, recent, onRefresh }) {
       </aside>
     </div>
   );
+}
+
+function buildGmailComposeUrl({ to, subject, body, from }) {
+  const params = new URLSearchParams({
+    view: 'cm',
+    fs: '1',
+    to,
+    su: subject,
+    body,
+  });
+  return `https://mail.google.com/mail/u/${encodeURIComponent(from)}/?${params.toString()}`;
 }
 
 function ClusterSelect({ value, onChange }) {
