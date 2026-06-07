@@ -19,6 +19,10 @@
       "dest": "/server/index.js"
     },
     {
+      "src": "/robots.txt",
+      "dest": "/client/robots.txt"
+    },
+    {
       "src": "/assets/(.*)",
       "dest": "/client/assets/$1"
     },
@@ -29,6 +33,17 @@
     {
       "src": "/(.*)",
       "dest": "/client/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        }
+      ]
     }
   ]
 }
